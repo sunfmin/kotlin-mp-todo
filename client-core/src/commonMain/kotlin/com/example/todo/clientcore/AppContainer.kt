@@ -6,6 +6,8 @@ import com.example.todo.clientcore.lists.ListsViewModel
 import com.example.todo.clientcore.net.AuthApi
 import com.example.todo.clientcore.net.AuthorizedApi
 import com.example.todo.clientcore.net.ListsApi
+import com.example.todo.clientcore.net.TodosApi
+import com.example.todo.clientcore.todos.ListDetailViewModel
 import io.ktor.client.HttpClient
 import kotlinx.coroutines.CoroutineScope
 
@@ -26,7 +28,11 @@ class AppContainer(
     val authViewModel = AuthViewModel(authApi, scope)
 
     private val listsApi = ListsApi(authorized)
+    private val todosApi = TodosApi(authorized)
 
     /** A fresh Lists index ViewModel (call once per authenticated session). */
     fun listsViewModel() = ListsViewModel(listsApi, scope)
+
+    /** A fresh List-detail ViewModel for one List (call once per opened List). */
+    fun listDetailViewModel(listId: String) = ListDetailViewModel(listId, todosApi, scope)
 }

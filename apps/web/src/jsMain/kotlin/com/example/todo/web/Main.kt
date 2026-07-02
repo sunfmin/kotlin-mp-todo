@@ -13,11 +13,15 @@ import com.example.todo.clientcore.auth.InMemoryTokenStore
 import com.example.todo.clientcore.lists.ListsViewModel
 import com.example.todo.clientcore.net.ApiClient
 import com.example.todo.common.ListDto
+import com.example.todo.common.TodoDto
 import io.ktor.client.HttpClient
 import io.ktor.client.engine.js.Js
 import kotlinx.coroutines.MainScope
 import org.jetbrains.compose.web.attributes.disabled
+import org.jetbrains.compose.web.attributes.InputType
 import org.jetbrains.compose.web.dom.Button
+import org.jetbrains.compose.web.dom.CheckboxInput
+import org.jetbrains.compose.web.dom.Div
 import org.jetbrains.compose.web.dom.H1
 import org.jetbrains.compose.web.dom.H2
 import org.jetbrains.compose.web.dom.Li
@@ -74,7 +78,7 @@ private fun ListsApp(container: AppContainer, onSignOut: () -> Unit) {
             onSignOut = onSignOut,
         )
     } else {
-        ListDetail(current) { openList = null }
+        ListDetail(current, container) { openList = null }
     }
 }
 
@@ -132,10 +136,112 @@ private fun ListRow(
 }
 
 @Composable
-private fun ListDetail(list: ListDto, onBack: () -> Unit) {
+private fun ListDetail(list: ListDto, container: AppContainer, onBack: () -> Unit) {
+    val viewModel = remember(list.id) { container.listDetailViewModel(list.id) }
+    LaunchedEffect(list.id) { viewModel.load() }
+    val state by viewModel.state.collectAsState()
+
     Button(attrs = { onClick { onBack() } }) { Text("← Lists") }
     H2 { Text(list.name) }
-    P { Text("No todos yet.") }
+
+    // Add todo
+    var newTitle by remember { mutableStateOf("") }
+    var newDesc by remember { mutableStateOf("") }
+    var newDue by remember { mutableStateOf("") }
+    P {
+        TextInput(newTitle) { onInput { newTitle = it.value } }
+        Span { Text(" ") }
+        Button(attrs = {
+            if (newTitle.isBlank()) disabled()
+            onClick {
+                viewModel.add(
+                    newTitle.trim(),
+                    newDesc.trim().takeIf(String::isNotEmpty),
+                    newDue.trim().takeIf(String::isNotEmpty),
+                )
+                newTitle = ""; newDesc = ""; newDue = ""
+            }
+        }) { Text("Add") }
+    }
+    P {
+        TextInput(newDesc) { onInput { newDesc = it.value } }
+        Span { Text(" ") }
+        TextInput(newDue) { onInput { newDue = it.value } }
+    }
+
+    state.error?.let { P { Text("⚠ $it") } }
+
+    if (state.todos.isEmpty()) {
+        P { Text("No todos yet. Add your first one above.") }
+    } else {
+        Ul {
+            state.todos.forEachIndexed { idx, todo ->
+                Li {
+                    WebTodoRow(
+                        todo = todo,
+                        onToggle = { viewModel.toggle(todo) },
+                        onSave = { title, desc, due -> viewModel.update(todo, title, desc, due) },
+                        onDelete = { viewModel.delete(todo) },
+                        onMoveUp = {
+                            if (idx > 0) viewModel.reorder(todo.id, state.todos[idx - 1].id)
+                        },
+                        onMoveDown = {
+                            if (idx < state.todos.size - 1)
+                                viewModel.reorder(todo.id, state.todos.getOrNull(idx + 2)?.id)
+                        },
+                    )
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun WebTodoRow(
+    todo: TodoDto,
+    onToggle: () -> Unit,
+    onSave: (String, String?, String?) -> Unit,
+    onDelete: () -> Unit,
+    onMoveUp: () -> Unit,
+    onMoveDown: () -> Unit,
+) {
+    var editing by remember(todo.id) { mutableStateOf(false) }
+    var draftTitle by remember(todo.id) { mutableStateOf(todo.title) }
+    var draftDesc by remember(todo.id) { mutableStateOf(todo.description ?: "") }
+    var draftDue by remember(todo.id) { mutableStateOf(todo.dueDate ?: "") }
+
+    if (editing) {
+        Div {
+            TextInput(draftTitle) { onInput { draftTitle = it.value } }
+            TextInput(draftDesc) { onInput { draftDesc = it.value } }
+            TextInput(draftDue) { onInput { draftDue = it.value } }
+            Button(attrs = {
+                onClick {
+                    onSave(draftTitle.trim(), draftDesc.trim().takeIf(String::isNotEmpty), draftDue.trim().takeIf(String::isNotEmpty))
+                    editing = false
+                }
+            }) { Text("Save") }
+            Button(attrs = {
+                onClick { draftTitle = todo.title; draftDesc = todo.description ?: ""; draftDue = todo.dueDate ?: ""; editing = false }
+            }) { Text("Cancel") }
+        }
+    } else {
+        Div {
+            CheckboxInput(checked = todo.completed, attrs = { onClick { onToggle() } })
+            Span {
+                Text(
+                    (if (todo.completed) "✓ " else "") + todo.title +
+                        (todo.description?.let { " — $it" } ?: "") +
+                        (todo.dueDate?.let { " (due $it)" } ?: ""),
+                )
+            }
+            Span { Text(" ") }
+            Button(attrs = { onClick { editing = true } }) { Text("Edit") }
+            Button(attrs = { onClick { onMoveUp() } }) { Text("↑") }
+            Button(attrs = { onClick { onMoveDown() } }) { Text("↓") }
+            Button(attrs = { onClick { onDelete() } }) { Text("Delete") }
+        }
+    }
 }
 
 @Composable

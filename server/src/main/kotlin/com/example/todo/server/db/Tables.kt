@@ -1,6 +1,7 @@
 package com.example.todo.server.db
 
 import org.jetbrains.exposed.sql.Table
+import org.jetbrains.exposed.sql.kotlin.datetime.date
 import org.jetbrains.exposed.sql.kotlin.datetime.timestamp
 
 object Users : Table("users") {
@@ -44,6 +45,24 @@ object Lists : Table("lists") {
     val id = uuid("id")
     val name = varchar("name", 200)
     val ownerId = uuid("owner_id").references(Users.id)
+    val createdAt = timestamp("created_at")
+    override val primaryKey = PrimaryKey(id)
+}
+
+/**
+ * A Todo within a List (slice 4). [listId] is a NOT NULL FK with CASCADE, so a
+ * Todo is never orphaned and is deleted with its List. [orderKey] is a
+ * fractional key for manual ordering: moving one Todo is a single-row UPDATE
+ * and never requires renumbering the whole List.
+ */
+object Todos : Table("todos") {
+    val id = uuid("id")
+    val listId = uuid("list_id").references(Lists.id)
+    val title = varchar("title", 500)
+    val description = text("description").nullable()
+    val dueDate = date("due_date").nullable()
+    val completed = bool("completed").default(false)
+    val orderKey = double("order_key")
     val createdAt = timestamp("created_at")
     override val primaryKey = PrimaryKey(id)
 }

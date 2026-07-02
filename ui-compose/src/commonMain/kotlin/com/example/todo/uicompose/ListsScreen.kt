@@ -10,6 +10,7 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
+import androidx.compose.material3.Checkbox
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
@@ -24,9 +25,11 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.unit.dp
 import com.example.todo.clientcore.AppContainer
 import com.example.todo.common.ListDto
+import com.example.todo.common.TodoDto
 
 /**
  * The authenticated Lists app: index of the user's Lists with create/rename/delete,
@@ -54,7 +57,11 @@ fun ListsApp(container: AppContainer, onSignOut: () -> Unit) {
             onSignOut = onSignOut,
         )
     } else {
-        ListDetail(list = current, onBack = { openList = null })
+        ListDetail(
+            list = current,
+            container = container,
+            onBack = { openList = null },
+        )
     }
 }
 
@@ -151,16 +158,171 @@ private fun ListRow(
 }
 
 @Composable
-private fun ListDetail(list: ListDto, onBack: () -> Unit) {
+private fun ListDetail(list: ListDto, container: AppContainer, onBack: () -> Unit) {
+    val viewModel = remember(list.id) { container.listDetailViewModel(list.id) }
+    LaunchedEffect(list.id) { viewModel.load() }
+    val state by viewModel.state.collectAsState()
+
     Column(modifier = Modifier.fillMaxSize().padding(16.dp)) {
         Row(verticalAlignment = Alignment.CenterVertically) {
             TextButton(onClick = onBack) { Text("← Lists") }
             Text(list.name, style = MaterialTheme.typography.headlineSmall, modifier = Modifier.padding(start = 8.dp))
         }
-        Text(
-            "No todos yet.",
-            style = MaterialTheme.typography.bodyMedium,
-            modifier = Modifier.padding(top = 24.dp),
+        AddTodoRow(onAdd = { title, desc, due -> viewModel.add(title, desc, due) })
+        error(state.error)
+        if (state.todos.isEmpty()) {
+            Text(
+                "No todos yet. Add your first one above.",
+                style = MaterialTheme.typography.bodyMedium,
+                modifier = Modifier.padding(top = 24.dp),
+            )
+        } else {
+            LazyColumn(modifier = Modifier.fillMaxWidth().padding(top = 12.dp)) {
+                items(state.todos, key = { it.id }) { todo ->
+                    TodoRow(
+                        todo = todo,
+                        onToggle = { viewModel.toggle(todo) },
+                        onSave = { title, desc, due -> viewModel.update(todo, title, desc, due) },
+                        onDelete = { viewModel.delete(todo) },
+                        onMoveUp = {
+                            val idx = state.todos.indexOfFirst { it.id == todo.id }
+                            if (idx > 0) viewModel.reorder(todo.id, state.todos[idx - 1].id)
+                        },
+                        onMoveDown = {
+                            val idx = state.todos.indexOfFirst { it.id == todo.id }
+                            if (idx >= 0 && idx < state.todos.size - 1)
+                                viewModel.reorder(todo.id, state.todos.getOrNull(idx + 2)?.id)
+                        },
+                    )
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun AddTodoRow(onAdd: (String, String?, String?) -> Unit) {
+    var title by remember { mutableStateOf("") }
+    var description by remember { mutableStateOf("") }
+    var dueDate by remember { mutableStateOf("") }
+    var expanded by remember { mutableStateOf(false) }
+
+    Row(modifier = Modifier.fillMaxWidth().padding(top = 8.dp), verticalAlignment = Alignment.CenterVertically) {
+        OutlinedTextField(
+            value = title,
+            onValueChange = { title = it },
+            label = { Text("New todo") },
+            singleLine = true,
+            modifier = Modifier.weight(1f),
         )
+        Button(
+            onClick = {
+                if (title.isNotBlank()) {
+                    onAdd(
+                        title.trim(),
+                        description.trim().takeIf(String::isNotEmpty),
+                        dueDate.trim().takeIf(String::isNotEmpty),
+                    )
+                    title = ""; description = ""; dueDate = ""
+                }
+            },
+            enabled = title.isNotBlank(),
+            modifier = Modifier.padding(start = 8.dp),
+        ) { Text("Add") }
+    }
+    TextButton(onClick = { expanded = !expanded }) {
+        Text(if (expanded) "Less options" else "More options")
+    }
+    if (expanded) {
+        Column {
+            OutlinedTextField(
+                value = description,
+                onValueChange = { description = it },
+                label = { Text("Description (optional)") },
+                modifier = Modifier.fillMaxWidth().padding(top = 4.dp),
+            )
+            OutlinedTextField(
+                value = dueDate,
+                onValueChange = { dueDate = it },
+                label = { Text("Due date yyyy-MM-dd (optional)") },
+                singleLine = true,
+                modifier = Modifier.fillMaxWidth().padding(top = 4.dp),
+            )
+        }
+    }
+}
+
+@Composable
+private fun TodoRow(
+    todo: TodoDto,
+    onToggle: () -> Unit,
+    onSave: (String, String?, String?) -> Unit,
+    onDelete: () -> Unit,
+    onMoveUp: () -> Unit,
+    onMoveDown: () -> Unit,
+) {
+    var editing by remember(todo.id) { mutableStateOf(false) }
+    var draftTitle by remember(todo.id) { mutableStateOf(todo.title) }
+    var draftDesc by remember(todo.id) { mutableStateOf(todo.description ?: "") }
+    var draftDue by remember(todo.id) { mutableStateOf(todo.dueDate ?: "") }
+
+    Card(modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp)) {
+        Column(modifier = Modifier.padding(12.dp)) {
+            if (editing) {
+                OutlinedTextField(
+                    value = draftTitle,
+                    onValueChange = { draftTitle = it },
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth(),
+                )
+                OutlinedTextField(
+                    value = draftDesc,
+                    onValueChange = { draftDesc = it },
+                    label = { Text("Description") },
+                    modifier = Modifier.fillMaxWidth().padding(top = 4.dp),
+                )
+                OutlinedTextField(
+                    value = draftDue,
+                    onValueChange = { draftDue = it },
+                    label = { Text("Due date") },
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth().padding(top = 4.dp),
+                )
+                Row(modifier = Modifier.padding(top = 4.dp)) {
+                    TextButton(onClick = {
+                        onSave(draftTitle.trim(), draftDesc.trim().takeIf(String::isNotEmpty), draftDue.trim().takeIf(String::isNotEmpty))
+                        editing = false
+                    }) { Text("Save") }
+                    TextButton(onClick = {
+                        draftTitle = todo.title; draftDesc = todo.description ?: ""; draftDue = todo.dueDate ?: ""
+                        editing = false
+                    }) { Text("Cancel") }
+                }
+            } else {
+                Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth()) {
+                    Checkbox(checked = todo.completed, onCheckedChange = { onToggle() })
+                    Column(modifier = Modifier.weight(1f).padding(start = 8.dp)) {
+                        Text(
+                            todo.title,
+                            fontWeight = FontWeight.Medium,
+                            textDecoration = if (todo.completed) TextDecoration.LineThrough else TextDecoration.None,
+                        )
+                        todo.description?.let { Text(it, style = MaterialTheme.typography.bodySmall) }
+                        todo.dueDate?.let { Text("Due: $it", style = MaterialTheme.typography.bodySmall) }
+                    }
+                    TextButton(onClick = { editing = true }) { Text("Edit") }
+                    TextButton(onClick = onMoveUp) { Text("↑") }
+                    TextButton(onClick = onMoveDown) { Text("↓") }
+                    TextButton(onClick = onDelete) { Text("Delete") }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun error(message: String?) {
+    if (message != null) {
+        Text(message, color = MaterialTheme.colorScheme.error, modifier = Modifier.padding(top = 8.dp))
     }
 }

@@ -16,4 +16,15 @@ object ApiRoutes {
 
     /** Path for a single List by id. */
     fun list(id: String) = "$LISTS/$id"
+
+    // Todos (slice 4)
+
+    /** Path for the Todos of a List. */
+    fun todos(listId: String) = "${list(listId)}/todos"
+
+    /** Path for a single Todo within a List. */
+    fun todo(listId: String, todoId: String) = "${todos(listId)}/$todoId"
+
+    /** Path to reorder a Todo within its List. */
+    fun todoReorder(listId: String, todoId: String) = "${todo(listId, todoId)}/reorder"
 }

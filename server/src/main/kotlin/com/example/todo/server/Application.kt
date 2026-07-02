@@ -4,6 +4,7 @@ import com.example.todo.server.auth.AuthConfig
 import com.example.todo.server.auth.AuthService
 import com.example.todo.server.auth.JwtSupport
 import com.example.todo.server.lists.ListService
+import com.example.todo.server.todos.TodoService
 import com.example.todo.server.plugins.DatabaseFactory
 import com.example.todo.server.plugins.configureAuthentication
 import com.example.todo.server.plugins.configureSerialization
@@ -12,6 +13,7 @@ import com.example.todo.server.routes.authRoutes
 import com.example.todo.server.routes.healthRoutes
 import com.example.todo.server.routes.listRoutes
 import com.example.todo.server.routes.meRoutes
+import com.example.todo.server.routes.todoRoutes
 import io.ktor.server.application.Application
 import io.ktor.http.HttpHeaders
 import io.ktor.http.HttpMethod
@@ -48,6 +50,7 @@ fun Application.module() {
     val jwt = JwtSupport(authConfig)
     val authService = AuthService(authConfig, jwt)
     val listService = ListService()
+    val todoService = TodoService()
 
     // Dev CORS so the Compose HTML web client (served from a different origin/port)
     // can call the API. Tighten to specific hosts before production.
@@ -70,6 +73,7 @@ fun Application.module() {
         authRoutes(authService)
         meRoutes()
         listRoutes(listService)
+        todoRoutes(todoService)
     }
 }
 
