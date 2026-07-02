@@ -13,6 +13,7 @@ kotlin {
 dependencies {
     implementation(project(":ui-compose"))
     implementation(compose.desktop.currentOs)
+    implementation(compose.material3)
     implementation(libs.ktor.client.cio)
     implementation(libs.kotlinx.coroutines.core)
 }

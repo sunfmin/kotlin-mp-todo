@@ -1,18 +1,31 @@
 package com.example.todo.uicompose
 
+import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.Checkbox
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -24,17 +37,20 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextDecoration
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.example.todo.clientcore.AppContainer
+import com.example.todo.clientcore.lists.ListsState
+import com.example.todo.clientcore.todos.ListDetailState
 import com.example.todo.common.ListDto
 import com.example.todo.common.TodoDto
 
 /**
  * The authenticated Lists app: index of the user's Lists with create/rename/delete,
- * and a detail view opened by tapping a List. In slice 3 the detail is an empty
- * placeholder; slice 4 fills it with Todos.
+ * and a detail view opened by tapping a List.
  */
 @Composable
 fun ListsApp(container: AppContainer, onSignOut: () -> Unit) {
@@ -43,7 +59,6 @@ fun ListsApp(container: AppContainer, onSignOut: () -> Unit) {
     val state by viewModel.state.collectAsState()
 
     var openList by remember { mutableStateOf<ListDto?>(null) }
-    // Keep the open List's name fresh after a rename.
     val current = openList?.let { o -> state.lists.firstOrNull { it.id == o.id } ?: o }
 
     if (current == null) {
@@ -57,16 +72,23 @@ fun ListsApp(container: AppContainer, onSignOut: () -> Unit) {
             onSignOut = onSignOut,
         )
     } else {
+        val detailViewModel = remember(current.id) { container.listDetailViewModel(current.id) }
+        LaunchedEffect(current.id) { detailViewModel.load() }
         ListDetail(
             list = current,
-            container = container,
+            state = detailViewModel.state.collectAsState().value,
             onBack = { openList = null },
+            onAdd = { t, d, dt -> detailViewModel.add(t, d, dt) },
+            onToggle = { detailViewModel.toggle(it) },
+            onSave = { todo, t, d, dt -> detailViewModel.update(todo, t, d, dt) },
+            onDelete = { detailViewModel.delete(it) },
+            onReorder = { id, before -> detailViewModel.reorder(id, before) },
         )
     }
 }
 
 @Composable
-private fun ListsIndex(
+fun ListsIndex(
     lists: List<ListDto>,
     error: String?,
     onOpen: (ListDto) -> Unit,
@@ -74,22 +96,32 @@ private fun ListsIndex(
     onRename: (String, String) -> Unit,
     onDelete: (String) -> Unit,
     onSignOut: () -> Unit,
+    selectedId: String? = null,
+    listCounts: Map<String, Int> = emptyMap(),
 ) {
     var newName by remember { mutableStateOf("") }
-    Column(modifier = Modifier.fillMaxSize().padding(16.dp)) {
+    Column(modifier = Modifier.fillMaxSize().padding(horizontal = 16.dp, vertical = 16.dp)) {
         Row(
             modifier = Modifier.fillMaxWidth(),
             horizontalArrangement = Arrangement.SpaceBetween,
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            Text("Your lists", style = MaterialTheme.typography.headlineSmall)
-            TextButton(onClick = onSignOut) { Text("Sign out") }
+            Text(
+                "Lists",
+                style = MaterialTheme.typography.titleMedium,
+                fontWeight = FontWeight.SemiBold,
+            )
+            Text(
+                "${lists.size}",
+                style = MaterialTheme.typography.labelMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
         }
-        Row(modifier = Modifier.fillMaxWidth().padding(top = 8.dp), verticalAlignment = Alignment.CenterVertically) {
+        Row(modifier = Modifier.fillMaxWidth().padding(top = 10.dp), verticalAlignment = Alignment.CenterVertically) {
             OutlinedTextField(
                 value = newName,
                 onValueChange = { newName = it },
-                label = { Text("New list name") },
+                label = { Text("New list") },
                 singleLine = true,
                 modifier = Modifier.weight(1f),
             )
@@ -99,57 +131,217 @@ private fun ListsIndex(
                 modifier = Modifier.padding(start = 8.dp),
             ) { Text("Add") }
         }
-        error?.let { Text(it, color = MaterialTheme.colorScheme.error, modifier = Modifier.padding(top = 8.dp)) }
+        error?.let {
+            Text(
+                it,
+                color = MaterialTheme.colorScheme.error,
+                style = MaterialTheme.typography.bodySmall,
+                modifier = Modifier.padding(top = 6.dp),
+            )
+        }
         if (lists.isEmpty()) {
             Text(
-                "No lists yet. Create your first one above.",
-                style = MaterialTheme.typography.bodyMedium,
+                "No lists yet.",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
                 modifier = Modifier.padding(top = 24.dp),
             )
         } else {
-            LazyColumn(modifier = Modifier.fillMaxWidth().padding(top = 12.dp)) {
+            LazyColumn(
+                modifier = Modifier.fillMaxWidth().padding(top = 12.dp),
+                verticalArrangement = Arrangement.spacedBy(2.dp),
+            ) {
                 items(lists, key = { it.id }) { list ->
-                    ListRow(list, onOpen = { onOpen(list) }, onRename = onRename, onDelete = onDelete)
+                    ListRow(
+                        list = list,
+                        isSelected = list.id == selectedId,
+                        count = listCounts[list.id],
+                        onOpen = { onOpen(list) },
+                        onRename = onRename,
+                        onDelete = onDelete,
+                    )
                 }
             }
         }
+        TextButton(
+            onClick = onSignOut,
+            modifier = Modifier.padding(top = 12.dp),
+        ) { Text("Sign out", style = MaterialTheme.typography.bodySmall) }
     }
 }
 
 @Composable
 private fun ListRow(
     list: ListDto,
+    isSelected: Boolean,
+    count: Int? = null,
     onOpen: () -> Unit,
     onRename: (String, String) -> Unit,
     onDelete: (String) -> Unit,
 ) {
     var editing by remember { mutableStateOf(false) }
     var draft by remember(list.id) { mutableStateOf(list.name) }
-    Card(modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp)) {
-        Column(modifier = Modifier.padding(12.dp)) {
+
+    val containerColor = if (isSelected) {
+        MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.5f)
+    } else {
+        MaterialTheme.colorScheme.surface
+    }
+
+    Surface(
+        modifier = Modifier.fillMaxWidth(),
+        color = containerColor,
+        shape = MaterialTheme.shapes.small,
+    ) {
+        Row(
+            modifier = Modifier.heightIn(min = 48.dp).padding(horizontal = 8.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            // Selection accent bar
+            Box(
+                modifier = Modifier
+                    .width(3.dp)
+                    .height(28.dp)
+                    .background(
+                        if (isSelected) MaterialTheme.colorScheme.primary else androidx.compose.ui.graphics.Color.Transparent,
+                        MaterialTheme.shapes.extraSmall,
+                    ),
+            )
+
             if (editing) {
                 OutlinedTextField(
                     value = draft,
                     onValueChange = { draft = it },
                     singleLine = true,
-                    modifier = Modifier.fillMaxWidth(),
+                    modifier = Modifier.weight(1f).padding(start = 8.dp),
                 )
-                Row(modifier = Modifier.padding(top = 4.dp)) {
-                    TextButton(onClick = { onRename(list.id, draft.trim()); editing = false }) { Text("Save") }
-                    TextButton(onClick = { draft = list.name; editing = false }) { Text("Cancel") }
-                }
+                TextButton(onClick = { onRename(list.id, draft.trim()); editing = false }) { Text("Save") }
+                TextButton(onClick = { draft = list.name; editing = false }) { Text("Cancel") }
             } else {
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically,
+                TextButton(
+                    onClick = onOpen,
+                    modifier = Modifier.weight(1f).padding(start = 8.dp),
                 ) {
-                    TextButton(onClick = onOpen) {
-                        Text(list.name, fontWeight = FontWeight.Medium)
+                    Text(
+                        list.name,
+                        fontWeight = if (isSelected) FontWeight.SemiBold else FontWeight.Normal,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                }
+                if (count != null) {
+                    Text(
+                        "$count",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.padding(end = 4.dp),
+                    )
+                }
+                IconButton(onClick = { editing = true }, modifier = Modifier.size(32.dp)) {
+                    Text("✎", style = MaterialTheme.typography.bodySmall)
+                }
+                IconButton(onClick = { onDelete(list.id) }, modifier = Modifier.size(32.dp)) {
+                    Text("×", style = MaterialTheme.typography.titleMedium, color = MaterialTheme.colorScheme.error)
+                }
+            }
+        }
+    }
+}
+
+@Composable
+fun ListDetail(
+    list: ListDto,
+    state: ListDetailState,
+    onBack: () -> Unit,
+    onAdd: (String, String?, String?) -> Unit,
+    onToggle: (TodoDto) -> Unit,
+    onSave: (TodoDto, String, String?, String?) -> Unit,
+    onDelete: (TodoDto) -> Unit,
+    onReorder: (String, String?) -> Unit,
+    showBackButton: Boolean = true,
+) {
+    val active = state.todos.filterNot { it.completed }
+    val done = state.todos.filter { it.completed }
+    val doneCount = done.size
+    val total = state.todos.size
+    val progress = if (total == 0) 0f else doneCount.toFloat() / total
+    var completedExpanded by remember { mutableStateOf(false) }
+
+    Column(modifier = Modifier.fillMaxSize()) {
+        // Header ribbon
+        Surface(color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.4f)) {
+            Column(modifier = Modifier.fillMaxWidth().padding(horizontal = 24.dp, vertical = 16.dp)) {
+                if (showBackButton) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        TextButton(onClick = onBack) { Text("← Lists") }
+                        Text(
+                            list.name,
+                            style = MaterialTheme.typography.titleLarge,
+                            fontWeight = FontWeight.SemiBold,
+                            modifier = Modifier.padding(start = 4.dp),
+                        )
                     }
-                    Row {
-                        TextButton(onClick = { editing = true }) { Text("Rename") }
-                        TextButton(onClick = { onDelete(list.id) }) { Text("Delete") }
+                } else {
+                    Text(
+                        list.name,
+                        style = MaterialTheme.typography.titleLarge,
+                        fontWeight = FontWeight.SemiBold,
+                    )
+                }
+                AddTodoRow(onAdd = onAdd)
+            }
+        }
+
+        error(state.error)
+
+        if (state.todos.isEmpty()) {
+            EmptyTodos()
+        } else {
+            LazyColumn(
+                modifier = Modifier.fillMaxWidth().padding(horizontal = 24.dp),
+                contentPadding = PaddingValues(top = 12.dp, bottom = 24.dp),
+                verticalArrangement = Arrangement.spacedBy(6.dp),
+            ) {
+                // Progress header
+                item {
+                    ProgressHeader(doneCount, total, progress)
+                }
+
+                // Active todos
+                items(active, key = { it.id }) { todo ->
+                    TodoRow(
+                        todo = todo,
+                        onToggle = { onToggle(todo) },
+                        onSave = { title, desc, due -> onSave(todo, title, desc, due) },
+                        onDelete = { onDelete(todo) },
+                        onMoveUp = {
+                            val idx = active.indexOfFirst { it.id == todo.id }
+                            if (idx > 0) onReorder(todo.id, active[idx - 1].id)
+                        },
+                        onMoveDown = {
+                            val idx = active.indexOfFirst { it.id == todo.id }
+                            if (idx >= 0 && idx < active.size - 1)
+                                onReorder(todo.id, active.getOrNull(idx + 2)?.id)
+                        },
+                    )
+                }
+
+                // Completed section
+                if (done.isNotEmpty()) {
+                    item {
+                        CompletedHeader(doneCount, completedExpanded) { completedExpanded = !completedExpanded }
+                    }
+                    if (completedExpanded) {
+                        items(done, key = { it.id }) { todo ->
+                            TodoRow(
+                                todo = todo,
+                                onToggle = { onToggle(todo) },
+                                onSave = { title, desc, due -> onSave(todo, title, desc, due) },
+                                onDelete = { onDelete(todo) },
+                                onMoveUp = {},
+                                onMoveDown = {},
+                            )
+                        }
                     }
                 }
             }
@@ -158,44 +350,75 @@ private fun ListRow(
 }
 
 @Composable
-private fun ListDetail(list: ListDto, container: AppContainer, onBack: () -> Unit) {
-    val viewModel = remember(list.id) { container.listDetailViewModel(list.id) }
-    LaunchedEffect(list.id) { viewModel.load() }
-    val state by viewModel.state.collectAsState()
-
-    Column(modifier = Modifier.fillMaxSize().padding(16.dp)) {
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            TextButton(onClick = onBack) { Text("← Lists") }
-            Text(list.name, style = MaterialTheme.typography.headlineSmall, modifier = Modifier.padding(start = 8.dp))
-        }
-        AddTodoRow(onAdd = { title, desc, due -> viewModel.add(title, desc, due) })
-        error(state.error)
-        if (state.todos.isEmpty()) {
+private fun ProgressHeader(done: Int, total: Int, progress: Float) {
+    Column(modifier = Modifier.fillMaxWidth().padding(bottom = 8.dp)) {
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
             Text(
-                "No todos yet. Add your first one above.",
-                style = MaterialTheme.typography.bodyMedium,
-                modifier = Modifier.padding(top = 24.dp),
+                "$done of $total done",
+                style = MaterialTheme.typography.labelMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
-        } else {
-            LazyColumn(modifier = Modifier.fillMaxWidth().padding(top = 12.dp)) {
-                items(state.todos, key = { it.id }) { todo ->
-                    TodoRow(
-                        todo = todo,
-                        onToggle = { viewModel.toggle(todo) },
-                        onSave = { title, desc, due -> viewModel.update(todo, title, desc, due) },
-                        onDelete = { viewModel.delete(todo) },
-                        onMoveUp = {
-                            val idx = state.todos.indexOfFirst { it.id == todo.id }
-                            if (idx > 0) viewModel.reorder(todo.id, state.todos[idx - 1].id)
-                        },
-                        onMoveDown = {
-                            val idx = state.todos.indexOfFirst { it.id == todo.id }
-                            if (idx >= 0 && idx < state.todos.size - 1)
-                                viewModel.reorder(todo.id, state.todos.getOrNull(idx + 2)?.id)
-                        },
+            Text(
+                "${(progress * 100).toInt()}%",
+                style = MaterialTheme.typography.labelMedium,
+                fontWeight = FontWeight.SemiBold,
+                color = MaterialTheme.colorScheme.primary,
+            )
+        }
+        Box(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(top = 4.dp)
+                .background(
+                    MaterialTheme.colorScheme.surfaceVariant,
+                    MaterialTheme.shapes.extraLarge,
+                )
+                .size(width = 1.dp, height = 4.dp)
+        ) {
+            Box(
+                modifier = Modifier
+                    .background(
+                        MaterialTheme.colorScheme.primary,
+                        MaterialTheme.shapes.extraLarge,
                     )
-                }
+                    .size(width = 1.dp, height = 4.dp)
+                    .fillMaxWidth(progress)
+            )
+        }
+    }
+}
+
+@Composable
+private fun CompletedHeader(count: Int, expanded: Boolean, onToggle: () -> Unit) {
+    Surface(
+        modifier = Modifier.fillMaxWidth().padding(top = 8.dp),
+        color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.3f),
+        shape = MaterialTheme.shapes.small,
+        onClick = onToggle,
+    ) {
+        Row(
+            modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 10.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.SpaceBetween,
+        ) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text("✓", color = MaterialTheme.colorScheme.primary, fontWeight = FontWeight.Bold)
+                Text(
+                    "Completed ($count)",
+                    style = MaterialTheme.typography.labelLarge,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.padding(start = 8.dp),
+                )
             }
+            Text(
+                if (expanded) "▲" else "▼",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
         }
     }
 }
@@ -207,31 +430,30 @@ private fun AddTodoRow(onAdd: (String, String?, String?) -> Unit) {
     var dueDate by remember { mutableStateOf("") }
     var expanded by remember { mutableStateOf(false) }
 
-    Row(modifier = Modifier.fillMaxWidth().padding(top = 8.dp), verticalAlignment = Alignment.CenterVertically) {
+    Row(modifier = Modifier.fillMaxWidth().padding(top = 12.dp), verticalAlignment = Alignment.CenterVertically) {
         OutlinedTextField(
             value = title,
             onValueChange = { title = it },
             label = { Text("New todo") },
             singleLine = true,
-            modifier = Modifier.weight(1f),
+            modifier = Modifier.weight(1f).heightIn(min = 48.dp),
         )
         Button(
             onClick = {
                 if (title.isNotBlank()) {
-                    onAdd(
-                        title.trim(),
-                        description.trim().takeIf(String::isNotEmpty),
-                        dueDate.trim().takeIf(String::isNotEmpty),
-                    )
+                    onAdd(title.trim(), description.trim().takeIf(String::isNotEmpty), dueDate.trim().takeIf(String::isNotEmpty))
                     title = ""; description = ""; dueDate = ""
                 }
             },
             enabled = title.isNotBlank(),
-            modifier = Modifier.padding(start = 8.dp),
+            modifier = Modifier.padding(start = 12.dp),
         ) { Text("Add") }
     }
     TextButton(onClick = { expanded = !expanded }) {
-        Text(if (expanded) "Less options" else "More options")
+        Text(
+            if (expanded) "Less options" else "More options",
+            style = MaterialTheme.typography.bodySmall,
+        )
     }
     if (expanded) {
         Column {
@@ -265,55 +487,116 @@ private fun TodoRow(
     var draftTitle by remember(todo.id) { mutableStateOf(todo.title) }
     var draftDesc by remember(todo.id) { mutableStateOf(todo.description ?: "") }
     var draftDue by remember(todo.id) { mutableStateOf(todo.dueDate ?: "") }
+    var menuOpen by remember { mutableStateOf(false) }
 
-    Card(modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp)) {
-        Column(modifier = Modifier.padding(12.dp)) {
+    val rowAlpha = if (todo.completed) 0.6f else 1f
+    val accentColor = if (todo.completed) {
+        MaterialTheme.colorScheme.outline.copy(alpha = 0.4f)
+    } else {
+        MaterialTheme.colorScheme.primary
+    }
+
+    Surface(
+        modifier = Modifier.fillMaxWidth().alpha(rowAlpha),
+        color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.35f),
+        shape = MaterialTheme.shapes.small,
+    ) {
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            modifier = Modifier.heightIn(min = 56.dp).padding(start = 0.dp),
+        ) {
+            // Left accent bar — the "notebook margin"
+            Box(
+                modifier = Modifier
+                    .width(3.dp)
+                    .heightIn(min = 56.dp)
+                    .background(accentColor),
+            )
+
+            // Custom circular checkbox
+            Surface(
+                modifier = Modifier
+                    .padding(start = 12.dp)
+                    .size(24.dp)
+                    .clickable { onToggle() },
+                shape = MaterialTheme.shapes.extraLarge,
+                color = if (todo.completed) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.surface,
+                border = if (todo.completed) null else androidx.compose.foundation.BorderStroke(2.dp, MaterialTheme.colorScheme.outline),
+            ) {
+                if (todo.completed) {
+                    Box(contentAlignment = Alignment.Center) {
+                        Text("✓", color = MaterialTheme.colorScheme.onPrimary, fontWeight = FontWeight.Bold, style = MaterialTheme.typography.labelMedium)
+                    }
+                }
+            }
+
             if (editing) {
-                OutlinedTextField(
-                    value = draftTitle,
-                    onValueChange = { draftTitle = it },
-                    singleLine = true,
-                    modifier = Modifier.fillMaxWidth(),
-                )
-                OutlinedTextField(
-                    value = draftDesc,
-                    onValueChange = { draftDesc = it },
-                    label = { Text("Description") },
-                    modifier = Modifier.fillMaxWidth().padding(top = 4.dp),
-                )
-                OutlinedTextField(
-                    value = draftDue,
-                    onValueChange = { draftDue = it },
-                    label = { Text("Due date") },
-                    singleLine = true,
-                    modifier = Modifier.fillMaxWidth().padding(top = 4.dp),
-                )
-                Row(modifier = Modifier.padding(top = 4.dp)) {
-                    TextButton(onClick = {
-                        onSave(draftTitle.trim(), draftDesc.trim().takeIf(String::isNotEmpty), draftDue.trim().takeIf(String::isNotEmpty))
-                        editing = false
-                    }) { Text("Save") }
-                    TextButton(onClick = {
-                        draftTitle = todo.title; draftDesc = todo.description ?: ""; draftDue = todo.dueDate ?: ""
-                        editing = false
-                    }) { Text("Cancel") }
+                Column(modifier = Modifier.weight(1f).padding(start = 8.dp, end = 8.dp, top = 8.dp, bottom = 8.dp)) {
+                    OutlinedTextField(value = draftTitle, onValueChange = { draftTitle = it }, singleLine = true, modifier = Modifier.fillMaxWidth())
+                    OutlinedTextField(value = draftDesc, onValueChange = { draftDesc = it }, label = { Text("Description") }, modifier = Modifier.fillMaxWidth().padding(top = 4.dp))
+                    OutlinedTextField(value = draftDue, onValueChange = { draftDue = it }, label = { Text("Due date") }, singleLine = true, modifier = Modifier.fillMaxWidth().padding(top = 4.dp))
+                    Row(modifier = Modifier.padding(top = 4.dp)) {
+                        TextButton(onClick = {
+                            onSave(draftTitle.trim(), draftDesc.trim().takeIf(String::isNotEmpty), draftDue.trim().takeIf(String::isNotEmpty))
+                            editing = false
+                        }) { Text("Save") }
+                        TextButton(onClick = {
+                            draftTitle = todo.title; draftDesc = todo.description ?: ""; draftDue = todo.dueDate ?: ""; editing = false
+                        }) { Text("Cancel") }
+                    }
                 }
             } else {
-                Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth()) {
-                    Checkbox(checked = todo.completed, onCheckedChange = { onToggle() })
-                    Column(modifier = Modifier.weight(1f).padding(start = 8.dp)) {
+                Column(modifier = Modifier.weight(1f).padding(start = 8.dp, top = 10.dp, bottom = 10.dp)) {
+                    Text(
+                        todo.title,
+                        style = MaterialTheme.typography.bodyLarge,
+                        fontWeight = FontWeight.Medium,
+                        textDecoration = if (todo.completed) TextDecoration.LineThrough else TextDecoration.None,
+                        color = if (todo.completed) MaterialTheme.colorScheme.onSurfaceVariant else MaterialTheme.colorScheme.onSurface,
+                        maxLines = 2,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                    todo.description?.let {
                         Text(
-                            todo.title,
-                            fontWeight = FontWeight.Medium,
-                            textDecoration = if (todo.completed) TextDecoration.LineThrough else TextDecoration.None,
+                            it,
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
                         )
-                        todo.description?.let { Text(it, style = MaterialTheme.typography.bodySmall) }
-                        todo.dueDate?.let { Text("Due: $it", style = MaterialTheme.typography.bodySmall) }
                     }
-                    TextButton(onClick = { editing = true }) { Text("Edit") }
-                    TextButton(onClick = onMoveUp) { Text("↑") }
-                    TextButton(onClick = onMoveDown) { Text("↓") }
-                    TextButton(onClick = onDelete) { Text("Delete") }
+                    todo.dueDate?.let {
+                        Text(
+                            "Due $it",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                }
+
+                // Reorder buttons — subtle icon buttons
+                IconButton(onClick = onMoveUp, modifier = Modifier.size(36.dp)) {
+                    Text("↑", style = MaterialTheme.typography.titleMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                }
+                IconButton(onClick = onMoveDown, modifier = Modifier.size(36.dp)) {
+                    Text("↓", style = MaterialTheme.typography.titleMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                }
+
+                // Overflow menu for Edit + Delete
+                Box {
+                    IconButton(onClick = { menuOpen = true }, modifier = Modifier.size(36.dp)) {
+                        Text("⋯", style = MaterialTheme.typography.titleMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    }
+                    DropdownMenu(expanded = menuOpen, onDismissRequest = { menuOpen = false }) {
+                        DropdownMenuItem(
+                            text = { Text("Edit") },
+                            onClick = { menuOpen = false; editing = true },
+                        )
+                        DropdownMenuItem(
+                            text = { Text("Delete", color = MaterialTheme.colorScheme.error) },
+                            onClick = { menuOpen = false; onDelete() },
+                        )
+                    }
                 }
             }
         }
@@ -321,8 +604,49 @@ private fun TodoRow(
 }
 
 @Composable
+private fun EmptyTodos() {
+    Column(
+        modifier = Modifier.fillMaxSize().padding(horizontal = 48.dp),
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.Center,
+    ) {
+        // Distinctive empty-state mark — a soft circle with a pencil glyph
+        Surface(
+            modifier = Modifier.size(72.dp),
+            shape = MaterialTheme.shapes.extraLarge,
+            color = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.4f),
+        ) {
+            Box(contentAlignment = Alignment.Center) {
+                Text(
+                    "✎",
+                    style = MaterialTheme.typography.displaySmall,
+                    color = MaterialTheme.colorScheme.primary,
+                )
+            }
+        }
+        Text(
+            "Start your list",
+            style = MaterialTheme.typography.titleMedium,
+            fontWeight = FontWeight.SemiBold,
+            modifier = Modifier.padding(top = 20.dp),
+        )
+        Text(
+            "Add your first todo above to get going.",
+            style = MaterialTheme.typography.bodyMedium,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            modifier = Modifier.padding(top = 4.dp),
+        )
+    }
+}
+
+@Composable
 private fun error(message: String?) {
     if (message != null) {
-        Text(message, color = MaterialTheme.colorScheme.error, modifier = Modifier.padding(top = 8.dp))
+        Text(
+            message,
+            color = MaterialTheme.colorScheme.error,
+            style = MaterialTheme.typography.bodySmall,
+            modifier = Modifier.padding(horizontal = 24.dp, vertical = 4.dp),
+        )
     }
 }

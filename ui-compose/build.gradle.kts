@@ -35,6 +35,14 @@ kotlin {
         iosMain.dependencies {
             implementation(libs.ktor.client.darwin)
         }
+        commonTest.dependencies {
+            implementation(kotlin("test"))
+            @OptIn(org.jetbrains.compose.ExperimentalComposeLibrary::class)
+            implementation(compose.uiTest)
+            implementation(compose.components.uiToolingPreview)
+            implementation("org.jetbrains.skiko:skiko-awt-runtime-macos-arm64:0.9.4.2")
+            implementation(libs.kotlinx.coroutines.test)
+        }
     }
 }
 
