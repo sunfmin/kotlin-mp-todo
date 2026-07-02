@@ -1,8 +1,15 @@
 package com.example.todo.server
 
+import com.example.todo.server.auth.AuthConfig
+import com.example.todo.server.auth.AuthService
+import com.example.todo.server.auth.JwtSupport
 import com.example.todo.server.plugins.DatabaseFactory
+import com.example.todo.server.plugins.configureAuthentication
 import com.example.todo.server.plugins.configureSerialization
+import com.example.todo.server.plugins.configureStatusPages
+import com.example.todo.server.routes.authRoutes
 import com.example.todo.server.routes.healthRoutes
+import com.example.todo.server.routes.meRoutes
 import io.ktor.server.application.Application
 import io.ktor.http.HttpHeaders
 import io.ktor.http.HttpMethod
@@ -30,6 +37,15 @@ fun Application.module() {
 
     DatabaseFactory.connect(jdbcUrl, user, password)
 
+    val authConfig = AuthConfig(
+        jwtSecret = configString("auth.jwtSecret") ?: System.getenv("AUTH_JWT_SECRET")
+            ?: "dev-insecure-secret-change-me",
+        otpReturnInResponse = (configString("auth.otpReturnInResponse")
+            ?: System.getenv("AUTH_OTP_IN_RESPONSE"))?.toBoolean() ?: false,
+    )
+    val jwt = JwtSupport(authConfig)
+    val authService = AuthService(authConfig, jwt)
+
     // Dev CORS so the Compose HTML web client (served from a different origin/port)
     // can call the API. Tighten to specific hosts before production.
     install(CORS) {
@@ -44,8 +60,12 @@ fun Application.module() {
     }
 
     configureSerialization()
+    configureStatusPages()
+    configureAuthentication(jwt)
     routing {
         healthRoutes()
+        authRoutes(authService)
+        meRoutes()
     }
 }
 

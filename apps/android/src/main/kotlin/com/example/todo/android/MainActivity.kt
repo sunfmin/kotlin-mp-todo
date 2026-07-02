@@ -3,8 +3,10 @@ package com.example.todo.android
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
-import com.example.todo.clientcore.health.HealthViewModel
+import com.example.todo.clientcore.auth.AuthViewModel
+import com.example.todo.clientcore.auth.InMemoryTokenStore
 import com.example.todo.clientcore.net.ApiClient
+import com.example.todo.clientcore.net.AuthApi
 import com.example.todo.uicompose.App
 import io.ktor.client.HttpClient
 import io.ktor.client.engine.okhttp.OkHttp
@@ -17,7 +19,8 @@ class MainActivity : ComponentActivity() {
         // 10.0.2.2 is the host loopback as seen from the Android emulator.
         val baseUrl = "http://10.0.2.2:8080"
         val http = ApiClient.withJson(HttpClient(OkHttp.create()))
-        val viewModel = HealthViewModel(ApiClient(http, baseUrl), CoroutineScope(Dispatchers.Main))
+        val api = AuthApi(http, baseUrl, InMemoryTokenStore())
+        val viewModel = AuthViewModel(api, CoroutineScope(Dispatchers.Main))
         setContent { App(viewModel) }
     }
 }
