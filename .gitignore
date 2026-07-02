@@ -1,0 +1,31 @@
+# Gradle
+.gradle/
+build/
+!gradle/wrapper/gradle-wrapper.jar
+!**/src/**/build/
+local.properties
+
+# Kotlin / Native
+*.klib
+kotlin-js-store/
+
+# IntelliJ / Android Studio
+.idea/
+*.iml
+*.ipr
+*.iws
+.kotlin/
+
+# Xcode / iOS
+xcuserdata/
+*.xcworkspace/xcuserdata/
+DerivedData/
+*.hmap
+Pods/
+
+# OS
+.DS_Store
+
+# Env / secrets
+.env
+*.local
