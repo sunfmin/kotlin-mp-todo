@@ -15,6 +15,7 @@ dependencies {
     implementation(libs.ktor.server.netty)
     implementation(libs.ktor.server.contentnegotiation)
     implementation(libs.ktor.server.statuspages)
+    implementation(libs.ktor.server.cors)
     implementation(libs.ktor.serialization.json)
 
     implementation(libs.exposed.core)

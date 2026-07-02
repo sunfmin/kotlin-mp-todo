@@ -4,8 +4,12 @@ import com.example.todo.server.plugins.DatabaseFactory
 import com.example.todo.server.plugins.configureSerialization
 import com.example.todo.server.routes.healthRoutes
 import io.ktor.server.application.Application
+import io.ktor.http.HttpHeaders
+import io.ktor.http.HttpMethod
+import io.ktor.server.application.install
 import io.ktor.server.engine.embeddedServer
 import io.ktor.server.netty.Netty
+import io.ktor.server.plugins.cors.routing.CORS
 import io.ktor.server.routing.routing
 
 fun main() {
@@ -25,6 +29,19 @@ fun Application.module() {
     val password = configString("db.password") ?: System.getenv("DB_PASSWORD") ?: "todo"
 
     DatabaseFactory.connect(jdbcUrl, user, password)
+
+    // Dev CORS so the Compose HTML web client (served from a different origin/port)
+    // can call the API. Tighten to specific hosts before production.
+    install(CORS) {
+        anyHost()
+        allowHeader(HttpHeaders.ContentType)
+        allowHeader(HttpHeaders.Authorization)
+        allowMethod(HttpMethod.Get)
+        allowMethod(HttpMethod.Post)
+        allowMethod(HttpMethod.Delete)
+        allowMethod(HttpMethod.Put)
+        allowMethod(HttpMethod.Patch)
+    }
 
     configureSerialization()
     routing {

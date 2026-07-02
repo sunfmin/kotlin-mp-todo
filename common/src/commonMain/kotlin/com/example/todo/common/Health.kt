@@ -13,8 +13,3 @@ data class HealthResponse(
     /** True when the server verified database connectivity while handling the request. */
     val databaseConnected: Boolean,
 )
-
-/** API paths shared between server and clients so the contract has a single source of truth. */
-object ApiRoutes {
-    const val HEALTH = "/health"
-}
