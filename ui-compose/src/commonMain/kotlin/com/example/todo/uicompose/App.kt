@@ -21,45 +21,54 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
+import com.example.todo.clientcore.AppContainer
 import com.example.todo.clientcore.auth.AuthPhase
 import com.example.todo.clientcore.auth.AuthState
 import com.example.todo.clientcore.auth.AuthViewModel
 
 /**
- * Slice 2 shared UI (ADR-0001): passwordless sign-in flow (email -> code -> home),
- * shared by Android, iOS, and Desktop. Web renders the equivalent with Compose HTML.
+ * Shared UI root (ADR-0001), used by Android, iOS, and Desktop. Web renders the
+ * equivalent with Compose HTML. Gates on the auth phase: sign-in flow until
+ * authenticated, then the Lists app.
  */
 @Composable
-fun App(viewModel: AuthViewModel) {
-    val state by viewModel.state.collectAsState()
+fun App(container: AppContainer) {
+    val state by container.authViewModel.state.collectAsState()
     MaterialTheme {
         Surface(modifier = Modifier.fillMaxSize()) {
-            Column(
-                modifier = Modifier.fillMaxSize().padding(24.dp),
-                horizontalAlignment = Alignment.CenterHorizontally,
-                verticalArrangement = Arrangement.Center,
-            ) {
-                Text("Collaborative Todo", style = MaterialTheme.typography.headlineMedium)
-                Column(modifier = Modifier.widthIn(max = 360.dp).padding(top = 24.dp)) {
-                    when (state.phase) {
-                        AuthPhase.EMAIL -> EmailStep(state) { viewModel.submitEmail(it) }
-                        AuthPhase.CODE -> CodeStep(
-                            state,
-                            onSubmit = { viewModel.submitCode(it) },
-                            onChangeEmail = { viewModel.changeEmail() },
-                        )
-                        AuthPhase.AUTHENTICATED -> Home(state.email) { viewModel.signOut() }
-                    }
-                    state.error?.let {
-                        Text(
-                            it,
-                            color = MaterialTheme.colorScheme.error,
-                            modifier = Modifier.padding(top = 12.dp),
-                        )
-                    }
-                }
+            when (state.phase) {
+                AuthPhase.EMAIL, AuthPhase.CODE -> SignInScreen(state, container.authViewModel)
+                AuthPhase.AUTHENTICATED -> ListsApp(container, onSignOut = { container.authViewModel.signOut() })
+            }
+        }
+    }
+}
+
+@Composable
+private fun SignInScreen(state: AuthState, viewModel: AuthViewModel) {
+    Column(
+        modifier = Modifier.fillMaxSize().padding(24.dp),
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.Center,
+    ) {
+        Text("Collaborative Todo", style = MaterialTheme.typography.headlineMedium)
+        Column(modifier = Modifier.widthIn(max = 360.dp).padding(top = 24.dp)) {
+            when (state.phase) {
+                AuthPhase.EMAIL -> EmailStep(state) { viewModel.submitEmail(it) }
+                AuthPhase.CODE -> CodeStep(
+                    state,
+                    onSubmit = { viewModel.submitCode(it) },
+                    onChangeEmail = { viewModel.changeEmail() },
+                )
+                AuthPhase.AUTHENTICATED -> {}
+            }
+            state.error?.let {
+                Text(
+                    it,
+                    color = MaterialTheme.colorScheme.error,
+                    modifier = Modifier.padding(top = 12.dp),
+                )
             }
         }
     }
@@ -110,23 +119,5 @@ private fun CodeStep(state: AuthState, onSubmit: (String) -> Unit, onChangeEmail
     }
     TextButton(onClick = onChangeEmail, modifier = Modifier.padding(top = 4.dp)) {
         Text("Use a different email")
-    }
-}
-
-@Composable
-private fun Home(email: String, onSignOut: () -> Unit) {
-    Text(
-        "Signed in as $email",
-        textAlign = TextAlign.Center,
-        modifier = Modifier.fillMaxWidth(),
-    )
-    Text(
-        "Your lists will appear here.",
-        style = MaterialTheme.typography.bodyMedium,
-        textAlign = TextAlign.Center,
-        modifier = Modifier.fillMaxWidth().padding(top = 8.dp),
-    )
-    Button(onClick = onSignOut, modifier = Modifier.fillMaxWidth().padding(top = 16.dp)) {
-        Text("Sign out")
     }
 }

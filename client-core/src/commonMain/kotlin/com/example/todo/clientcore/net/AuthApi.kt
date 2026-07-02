@@ -2,7 +2,6 @@ package com.example.todo.clientcore.net
 
 import com.example.todo.clientcore.auth.StoredTokens
 import com.example.todo.clientcore.auth.TokenStore
-import com.example.todo.common.ApiError
 import com.example.todo.common.ApiRoutes
 import com.example.todo.common.MeResponse
 import com.example.todo.common.RefreshRequest
@@ -22,9 +21,6 @@ import io.ktor.http.HttpHeaders
 import io.ktor.http.contentType
 import io.ktor.http.isSuccess
 
-/** Raised for non-2xx API responses, carrying the server's message when available. */
-class ApiException(val status: Int, override val message: String) : RuntimeException(message)
-
 /**
  * Auth operations against the server (ADR-0003). Persists tokens to the injected
  * [TokenStore] and transparently refreshes the access token on a 401 (silent refresh).
@@ -40,13 +36,13 @@ class AuthApi(
         http.post(url(ApiRoutes.AUTH_OTP_REQUEST)) {
             contentType(ContentType.Application.Json)
             setBody(RequestOtpRequest(email))
-        }.ok().body()
+        }.ensureOk().body()
 
     suspend fun verifyOtp(email: String, code: String): TokenResponse {
         val tokens = http.post(url(ApiRoutes.AUTH_OTP_VERIFY)) {
             contentType(ContentType.Application.Json)
             setBody(VerifyOtpRequest(email, code))
-        }.ok().body<TokenResponse>()
+        }.ensureOk().body<TokenResponse>()
         store.save(StoredTokens(tokens.accessToken, tokens.refreshToken, tokens.email))
         return tokens
     }
@@ -54,9 +50,9 @@ class AuthApi(
     /** Fetches the current identity, refreshing the access token once on a 401. */
     suspend fun me(): MeResponse {
         val first = requestMe()
-        if (first.status.value != 401) return first.ok().body()
+        if (first.status.value != 401) return first.ensureOk().body()
         if (!refresh()) throw ApiException(401, "Session expired")
-        return requestMe().ok().body()
+        return requestMe().ensureOk().body()
     }
 
     /** Uses the stored refresh token to obtain a new token pair. Returns false if it fails. */
@@ -92,13 +88,4 @@ class AuthApi(
         http.get(url(ApiRoutes.ME)) {
             store.load()?.accessToken?.let { header(HttpHeaders.Authorization, "Bearer $it") }
         }
-
-    private suspend fun HttpResponse.ok(): HttpResponse {
-        if (!status.isSuccess()) {
-            val message = runCatching { body<ApiError>().message }.getOrNull()
-                ?: "Request failed (${status.value})"
-            throw ApiException(status.value, message)
-        }
-        return this
-    }
 }
