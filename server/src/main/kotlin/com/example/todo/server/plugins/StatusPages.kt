@@ -1,6 +1,7 @@
 package com.example.todo.server.plugins
 
 import com.example.todo.common.ApiError
+import com.example.todo.server.DomainException
 import com.example.todo.server.auth.AuthException
 import io.ktor.http.HttpStatusCode
 import io.ktor.server.application.Application
@@ -19,6 +20,9 @@ fun Application.configureStatusPages() {
                 AuthException.Kind.BAD_REQUEST -> HttpStatusCode.BadRequest
             }
             call.respond(status, ApiError(cause.message ?: "Request failed"))
+        }
+        exception<DomainException> { call, cause ->
+            call.respond(cause.status, ApiError(cause.message ?: "Request failed"))
         }
         exception<BadRequestException> { call, _ ->
             call.respond(HttpStatusCode.BadRequest, ApiError("Malformed request."))

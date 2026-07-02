@@ -10,4 +10,10 @@ object ApiRoutes {
     const val AUTH_TOKEN_REFRESH = "/auth/token/refresh"
     const val AUTH_SIGNOUT = "/auth/signout"
     const val ME = "/me"
+
+    // Lists (slice 3)
+    const val LISTS = "/lists"
+
+    /** Path for a single List by id. */
+    fun list(id: String) = "$LISTS/$id"
 }

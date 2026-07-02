@@ -33,3 +33,17 @@ object OtpRequests : Table("otp_requests") {
     val requestedAt = timestamp("requested_at")
     override val primaryKey = PrimaryKey(id)
 }
+
+/**
+ * A List (slice 3). [ownerId] is the single authoritative Owner: a NOT NULL
+ * reference means a List can never be ownerless and never have two owners
+ * (ADR-0009's "exactly one Owner" invariant is structural). Editors are held
+ * separately in [Memberships] from slice 5; owner ∪ memberships = all members.
+ */
+object Lists : Table("lists") {
+    val id = uuid("id")
+    val name = varchar("name", 200)
+    val ownerId = uuid("owner_id").references(Users.id)
+    val createdAt = timestamp("created_at")
+    override val primaryKey = PrimaryKey(id)
+}
