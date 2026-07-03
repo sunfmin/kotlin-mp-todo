@@ -15,6 +15,8 @@ import org.jetbrains.exposed.sql.SqlExpressionBuilder.eq
 import org.jetbrains.exposed.sql.and
 import org.jetbrains.exposed.sql.deleteWhere
 import org.jetbrains.exposed.sql.insert
+import org.jetbrains.exposed.sql.max
+import org.jetbrains.exposed.sql.select
 import org.jetbrains.exposed.sql.selectAll
 import org.jetbrains.exposed.sql.transactions.transaction
 import org.jetbrains.exposed.sql.update
@@ -33,11 +35,14 @@ class TodoService(private val clock: () -> Instant = { Clock.System.now() }) {
         requireOwned(userId, listId)
         val cleanTitle = validateTitle(req.title)
         val cleanDesc = req.description?.trim()?.takeIf(String::isNotEmpty)
-        val cleanDue = req.dueDate?.takeIf(String::isNotEmpty)?.let { runCatching { LocalDate.parse(it) }.getOrNull() }
+        val cleanDue = req.dueDate?.let { parseDueDate(it) }
         val id = UUID.randomUUID()
         val now = clock()
-        val nextOrder = (Todos.selectAll().where { Todos.listId eq listId }
-            .maxOfOrNull { it[Todos.orderKey] } ?: 0.0) + 1.0
+        // Let the DB compute the max order key so adding a Todo doesn't load the
+        // whole List into memory.
+        val maxKey = Todos.orderKey.max()
+        val nextOrder = (Todos.select(maxKey).where { Todos.listId eq listId }
+            .firstOrNull()?.get(maxKey) ?: 0.0) + 1.0
         Todos.insert {
             it[Todos.id] = id
             it[Todos.listId] = listId
@@ -48,7 +53,16 @@ class TodoService(private val clock: () -> Instant = { Clock.System.now() }) {
             it[Todos.orderKey] = nextOrder
             it[createdAt] = now
         }
-        id.toDto()
+        TodoDto(
+            id = id.toString(),
+            listId = listId.toString(),
+            title = cleanTitle,
+            description = cleanDesc,
+            dueDate = cleanDue?.toString(),
+            completed = false,
+            order = nextOrder,
+            createdAt = now.toString(),
+        )
     }
 
     /** Todos in the List, ordered by [Todos.orderKey] ascending. */
@@ -67,20 +81,35 @@ class TodoService(private val clock: () -> Instant = { Clock.System.now() }) {
     fun update(userId: UUID, listId: UUID, todoId: UUID, req: UpdateTodoRequest): TodoDto =
         transaction {
             requireOwned(userId, listId)
-            requireTodo(listId, todoId)
-            val cleanDesc = req.description?.trim()?.takeIf(String::isNotEmpty)
-            val cleanDue = req.dueDate?.takeIf(String::isNotEmpty)?.let { runCatching { LocalDate.parse(it) }.getOrNull() }
+            val old = requireTodo(listId, todoId)
+            // A null field means "leave unchanged"; a present-but-blank field
+            // means "clear it" (so a user can remove a description or due date).
+            val reqDesc = req.description
+            val reqDue = req.dueDate
+            val newTitle = req.title?.let { validateTitle(it) } ?: old[Todos.title]
+            val newDesc =
+                if (reqDesc != null) reqDesc.trim().takeIf(String::isNotEmpty)
+                else old[Todos.description]
+            val newDue =
+                if (reqDue != null) parseDueDate(reqDue)
+                else old[Todos.dueDate]
+            val newCompleted = req.completed ?: old[Todos.completed]
             Todos.update({ Todos.id eq todoId }) {
-                req.title?.let { t -> it[Todos.title] = validateTitle(t) }
-                if (req.description != null) {
-                    it[Todos.description] = cleanDesc
-                }
-                if (req.dueDate != null) {
-                    it[Todos.dueDate] = cleanDue
-                }
-                req.completed?.let { c -> it[Todos.completed] = c }
+                it[Todos.title] = newTitle
+                it[Todos.description] = newDesc
+                it[Todos.dueDate] = newDue
+                it[Todos.completed] = newCompleted
             }
-            Todos.selectAll().where { Todos.id eq todoId }.single().toDto()
+            TodoDto(
+                id = todoId.toString(),
+                listId = listId.toString(),
+                title = newTitle,
+                description = newDesc,
+                dueDate = newDue?.toString(),
+                completed = newCompleted,
+                order = old[Todos.orderKey],
+                createdAt = old[Todos.createdAt].toString(),
+            )
         }
 
     fun delete(userId: UUID, listId: UUID, todoId: UUID): Unit = transaction {
@@ -92,7 +121,7 @@ class TodoService(private val clock: () -> Instant = { Clock.System.now() }) {
     fun reorder(userId: UUID, listId: UUID, todoId: UUID, req: ReorderTodoRequest): TodoDto =
         transaction {
             requireOwned(userId, listId)
-            requireTodo(listId, todoId)
+            val old = requireTodo(listId, todoId)
 
             // Current ordered Todos (excluding the one being moved).
             val others = Todos.selectAll().where { Todos.listId eq listId and (Todos.id neq todoId) }
@@ -101,7 +130,9 @@ class TodoService(private val clock: () -> Instant = { Clock.System.now() }) {
 
             val newKey = if (req.beforeId == null) {
                 // Move to the end.
-                (others.lastOrNull()?.second ?: 0.0) + 1.0
+                val key = (others.lastOrNull()?.second ?: 0.0) + 1.0
+                Todos.update({ Todos.id eq todoId }) { it[Todos.orderKey] = key }
+                key
             } else {
                 val targetId = runCatching { UUID.fromString(req.beforeId) }.getOrNull()
                     ?: throw DomainException.badRequest("Invalid beforeId.")
@@ -109,12 +140,42 @@ class TodoService(private val clock: () -> Instant = { Clock.System.now() }) {
                 if (targetIndex < 0) throw DomainException.notFound("Target Todo not found.")
                 val prev = if (targetIndex > 0) others[targetIndex - 1].second else null
                 val next = others[targetIndex].second
-                if (prev == null) next - 1.0 else (prev + next) / 2.0
+                val candidate = if (prev == null) next - 1.0 else (prev + next) / 2.0
+                // The fractional midpoint can exhaust double precision after many
+                // inserts into the same gap and collide with a neighbour. When it
+                // does, renumber the whole List with integer keys and place the
+                // moved Todo before the target — a rare O(n) fallback.
+                if (prev != null && (candidate <= prev || candidate >= next)) {
+                    rebalance(others, todoId, targetIndex)
+                } else {
+                    Todos.update({ Todos.id eq todoId }) { it[Todos.orderKey] = candidate }
+                    candidate
+                }
             }
 
-            Todos.update({ Todos.id eq todoId }) { it[Todos.orderKey] = newKey }
-            Todos.selectAll().where { Todos.id eq todoId }.single().toDto()
+            old.toDto(orderOverride = newKey)
         }
+
+    /**
+     * Reassign sequential integer order keys to the whole List with [movedId]
+     * inserted at [insertBefore], and return [movedId]'s new key. Used only when
+     * the fractional midpoint runs out of precision.
+     */
+    private fun rebalance(
+        others: List<Pair<UUID, Double>>,
+        movedId: UUID,
+        insertBefore: Int,
+    ): Double {
+        val ordered = others.map { it.first }.toMutableList()
+        ordered.add(insertBefore, movedId)
+        var movedKey = 0.0
+        ordered.forEachIndexed { index, id ->
+            val key = (index + 1).toDouble()
+            if (id == movedId) movedKey = key
+            Todos.update({ Todos.id eq id }) { it[Todos.orderKey] = key }
+        }
+        return movedKey
+    }
 
     private fun requireOwned(userId: UUID, listId: UUID) {
         val row = Lists.selectAll().where { Lists.id eq listId }.singleOrNull()
@@ -133,17 +194,26 @@ class TodoService(private val clock: () -> Instant = { Clock.System.now() }) {
         return trimmed
     }
 
-    private fun ResultRow.toDto() = TodoDto(
+    /**
+     * Parse a client-supplied due date. Blank means "clear it"; a valid
+     * yyyy-MM-dd sets it; anything else is a client error rather than a silent
+     * discard that would wipe an existing date.
+     */
+    private fun parseDueDate(raw: String): LocalDate? {
+        val trimmed = raw.trim()
+        if (trimmed.isEmpty()) return null
+        return runCatching { LocalDate.parse(trimmed) }.getOrNull()
+            ?: throw DomainException.badRequest("Invalid due date; expected format yyyy-MM-dd.")
+    }
+
+    private fun ResultRow.toDto(orderOverride: Double? = null) = TodoDto(
         id = this[Todos.id].toString(),
         listId = this[Todos.listId].toString(),
         title = this[Todos.title],
         description = this[Todos.description],
         dueDate = this[Todos.dueDate]?.toString(),
         completed = this[Todos.completed],
-        order = this[Todos.orderKey],
+        order = orderOverride ?: this[Todos.orderKey],
         createdAt = this[Todos.createdAt].toString(),
     )
-
-    private fun UUID.toDto(): TodoDto =
-        Todos.selectAll().where { Todos.id eq this@toDto }.single().toDto()
 }

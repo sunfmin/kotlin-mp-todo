@@ -141,6 +141,91 @@ class TodoApiTest {
     }
 
     @Test
+    fun `clearing description and due date removes them, null leaves them unchanged`() = testApp { client ->
+        val token = client.signIn("clear@example.com")
+        val listId = client.createList(token, "Clear list")
+        val id = client.post(ApiRoutes.todos(listId)) {
+            header(HttpHeaders.Authorization, "Bearer $token")
+            contentType(ContentType.Application.Json)
+            setBody(CreateTodoRequest("T", description = "Details", dueDate = "2026-01-01"))
+        }.body<TodoDto>().id
+
+        // A present-but-blank field clears the optional value.
+        val cleared = client.put(ApiRoutes.todo(listId, id)) {
+            header(HttpHeaders.Authorization, "Bearer $token")
+            contentType(ContentType.Application.Json); setBody(UpdateTodoRequest(description = "", dueDate = ""))
+        }.body<TodoDto>()
+        assertNull(cleared.description)
+        assertNull(cleared.dueDate)
+
+        // A null field is left unchanged rather than cleared.
+        val renamed = client.put(ApiRoutes.todo(listId, id)) {
+            header(HttpHeaders.Authorization, "Bearer $token")
+            contentType(ContentType.Application.Json)
+            setBody(UpdateTodoRequest(title = "T", description = "Back"))
+        }.body<TodoDto>()
+        assertEquals("Back", renamed.description)
+        val toggled = client.put(ApiRoutes.todo(listId, id)) {
+            header(HttpHeaders.Authorization, "Bearer $token")
+            contentType(ContentType.Application.Json); setBody(UpdateTodoRequest(completed = true))
+        }.body<TodoDto>()
+        assertEquals("Back", toggled.description)
+    }
+
+    @Test
+    fun `an invalid due date is rejected instead of silently dropped`() = testApp { client ->
+        val token = client.signIn("baddate@example.com")
+        val listId = client.createList(token, "Date list")
+        val id = client.post(ApiRoutes.todos(listId)) {
+            header(HttpHeaders.Authorization, "Bearer $token")
+            contentType(ContentType.Application.Json)
+            setBody(CreateTodoRequest("T", dueDate = "2026-01-01"))
+        }.body<TodoDto>().id
+
+        // A malformed date on update is a client error, not a silent wipe.
+        assertEquals(HttpStatusCode.BadRequest, client.put(ApiRoutes.todo(listId, id)) {
+            header(HttpHeaders.Authorization, "Bearer $token")
+            contentType(ContentType.Application.Json); setBody(UpdateTodoRequest(dueDate = "not-a-date"))
+        }.status)
+        // The existing due date survives the rejected update.
+        assertEquals("2026-01-01", client.get(ApiRoutes.todo(listId, id)) {
+            header(HttpHeaders.Authorization, "Bearer $token")
+        }.body<TodoDto>().dueDate)
+
+        // A malformed date on create is likewise rejected.
+        assertEquals(HttpStatusCode.BadRequest, client.post(ApiRoutes.todos(listId)) {
+            header(HttpHeaders.Authorization, "Bearer $token")
+            contentType(ContentType.Application.Json); setBody(CreateTodoRequest("Bad", dueDate = "2026-13-40"))
+        }.status)
+    }
+
+    @Test
+    fun `repeated inserts into the same gap keep distinct order keys`() = testApp { client ->
+        val token = client.signIn("reorder-collide@example.com")
+        val listId = client.createList(token, "Collide")
+        client.createTodo(token, listId, "L")
+        var target = client.createTodo(token, listId, "R").body<TodoDto>().id
+
+        // Chain-insert each new Todo just before the previous one, halving the
+        // same gap far past double-precision exhaustion. Without a rebalance the
+        // fractional keys would collide.
+        repeat(60) { i ->
+            val t = client.createTodo(token, listId, "T$i").body<TodoDto>().id
+            client.patch(ApiRoutes.todoReorder(listId, t)) {
+                header(HttpHeaders.Authorization, "Bearer $token")
+                contentType(ContentType.Application.Json); setBody(ReorderTodoRequest(beforeId = target))
+            }
+            target = t
+        }
+
+        val keys = client.get(ApiRoutes.todos(listId)) {
+            header(HttpHeaders.Authorization, "Bearer $token")
+        }.body<List<TodoDto>>().map { it.order }
+        assertEquals(keys.size, keys.toSet().size, "order keys must stay distinct")
+        assertTrue(keys.zipWithNext().all { (a, b) -> a < b }, "returned order must be strictly ascending")
+    }
+
+    @Test
     fun `delete removes the todo`() = testApp { client ->
         val token = client.signIn("delete@example.com")
         val listId = client.createList(token, "Delete list")

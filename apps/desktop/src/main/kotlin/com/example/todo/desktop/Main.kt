@@ -87,7 +87,7 @@ private fun MasterDetail(container: AppContainer, onSignOut: () -> Unit) {
         ) {
             ListsIndex(
                 lists = listsState.lists,
-                error = null,
+                error = listsState.error,
                 onOpen = { selectedList = it },
                 onCreate = { listsVm.create(it) },
                 onRename = { id, name -> listsVm.rename(id, name) },

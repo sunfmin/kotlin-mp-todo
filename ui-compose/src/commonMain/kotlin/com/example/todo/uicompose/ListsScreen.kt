@@ -97,7 +97,6 @@ fun ListsIndex(
     onDelete: (String) -> Unit,
     onSignOut: () -> Unit,
     selectedId: String? = null,
-    listCounts: Map<String, Int> = emptyMap(),
 ) {
     var newName by remember { mutableStateOf("") }
     Column(modifier = Modifier.fillMaxSize().padding(horizontal = 16.dp, vertical = 16.dp)) {
@@ -155,7 +154,6 @@ fun ListsIndex(
                     ListRow(
                         list = list,
                         isSelected = list.id == selectedId,
-                        count = listCounts[list.id],
                         onOpen = { onOpen(list) },
                         onRename = onRename,
                         onDelete = onDelete,
@@ -174,7 +172,6 @@ fun ListsIndex(
 private fun ListRow(
     list: ListDto,
     isSelected: Boolean,
-    count: Int? = null,
     onOpen: () -> Unit,
     onRename: (String, String) -> Unit,
     onDelete: (String) -> Unit,
@@ -227,14 +224,6 @@ private fun ListRow(
                         fontWeight = if (isSelected) FontWeight.SemiBold else FontWeight.Normal,
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis,
-                    )
-                }
-                if (count != null) {
-                    Text(
-                        "$count",
-                        style = MaterialTheme.typography.labelSmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        modifier = Modifier.padding(end = 4.dp),
                     )
                 }
                 IconButton(onClick = { editing = true }, modifier = Modifier.size(32.dp)) {
@@ -292,7 +281,7 @@ fun ListDetail(
             }
         }
 
-        error(state.error)
+        ErrorText(state.error)
 
         if (state.todos.isEmpty()) {
             EmptyTodos()
@@ -338,8 +327,8 @@ fun ListDetail(
                                 onToggle = { onToggle(todo) },
                                 onSave = { title, desc, due -> onSave(todo, title, desc, due) },
                                 onDelete = { onDelete(todo) },
-                                onMoveUp = {},
-                                onMoveDown = {},
+                                onMoveUp = null,
+                                onMoveDown = null,
                             )
                         }
                     }
@@ -373,20 +362,20 @@ private fun ProgressHeader(done: Int, total: Int, progress: Float) {
             modifier = Modifier
                 .fillMaxWidth()
                 .padding(top = 4.dp)
+                .height(4.dp)
                 .background(
                     MaterialTheme.colorScheme.surfaceVariant,
                     MaterialTheme.shapes.extraLarge,
                 )
-                .size(width = 1.dp, height = 4.dp)
         ) {
             Box(
                 modifier = Modifier
+                    .fillMaxWidth(progress)
+                    .height(4.dp)
                     .background(
                         MaterialTheme.colorScheme.primary,
                         MaterialTheme.shapes.extraLarge,
                     )
-                    .size(width = 1.dp, height = 4.dp)
-                    .fillMaxWidth(progress)
             )
         }
     }
@@ -480,8 +469,8 @@ private fun TodoRow(
     onToggle: () -> Unit,
     onSave: (String, String?, String?) -> Unit,
     onDelete: () -> Unit,
-    onMoveUp: () -> Unit,
-    onMoveDown: () -> Unit,
+    onMoveUp: (() -> Unit)?,
+    onMoveDown: (() -> Unit)?,
 ) {
     var editing by remember(todo.id) { mutableStateOf(false) }
     var draftTitle by remember(todo.id) { mutableStateOf(todo.title) }
@@ -537,7 +526,9 @@ private fun TodoRow(
                     OutlinedTextField(value = draftDue, onValueChange = { draftDue = it }, label = { Text("Due date") }, singleLine = true, modifier = Modifier.fillMaxWidth().padding(top = 4.dp))
                     Row(modifier = Modifier.padding(top = 4.dp)) {
                         TextButton(onClick = {
-                            onSave(draftTitle.trim(), draftDesc.trim().takeIf(String::isNotEmpty), draftDue.trim().takeIf(String::isNotEmpty))
+                            // Send blank (not null) for emptied fields so the server
+                            // clears them; null would mean "leave unchanged".
+                            onSave(draftTitle.trim(), draftDesc.trim(), draftDue.trim())
                             editing = false
                         }) { Text("Save") }
                         TextButton(onClick = {
@@ -574,12 +565,16 @@ private fun TodoRow(
                     }
                 }
 
-                // Reorder buttons — subtle icon buttons
-                IconButton(onClick = onMoveUp, modifier = Modifier.size(36.dp)) {
-                    Text("↑", style = MaterialTheme.typography.titleMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                // Reorder buttons — only for reorderable (active) rows.
+                if (onMoveUp != null) {
+                    IconButton(onClick = onMoveUp, modifier = Modifier.size(36.dp)) {
+                        Text("↑", style = MaterialTheme.typography.titleMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    }
                 }
-                IconButton(onClick = onMoveDown, modifier = Modifier.size(36.dp)) {
-                    Text("↓", style = MaterialTheme.typography.titleMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                if (onMoveDown != null) {
+                    IconButton(onClick = onMoveDown, modifier = Modifier.size(36.dp)) {
+                        Text("↓", style = MaterialTheme.typography.titleMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    }
                 }
 
                 // Overflow menu for Edit + Delete
@@ -640,7 +635,7 @@ private fun EmptyTodos() {
 }
 
 @Composable
-private fun error(message: String?) {
+private fun ErrorText(message: String?) {
     if (message != null) {
         Text(
             message,

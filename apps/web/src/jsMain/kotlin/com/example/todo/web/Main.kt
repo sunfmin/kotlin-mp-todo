@@ -217,7 +217,9 @@ private fun WebTodoRow(
             TextInput(draftDue) { onInput { draftDue = it.value } }
             Button(attrs = {
                 onClick {
-                    onSave(draftTitle.trim(), draftDesc.trim().takeIf(String::isNotEmpty), draftDue.trim().takeIf(String::isNotEmpty))
+                    // Send blank (not null) for emptied fields so the server clears
+                    // them; null would mean "leave unchanged".
+                    onSave(draftTitle.trim(), draftDesc.trim(), draftDue.trim())
                     editing = false
                 }
             }) { Text("Save") }
