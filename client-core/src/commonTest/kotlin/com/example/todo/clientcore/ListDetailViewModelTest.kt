@@ -4,6 +4,7 @@ import com.example.todo.clientcore.auth.InMemoryTokenStore
 import com.example.todo.clientcore.auth.StoredTokens
 import com.example.todo.clientcore.net.ApiClient
 import com.example.todo.clientcore.net.AuthorizedApi
+import com.example.todo.clientcore.net.MembershipApi
 import com.example.todo.clientcore.net.TodosApi
 import com.example.todo.clientcore.todos.ListDetailViewModel
 import com.example.todo.common.ApiRoutes
@@ -37,16 +38,20 @@ class ListDetailViewModelTest {
         val http = ApiClient.withJson(HttpClient(engine))
         val store = InMemoryTokenStore(StoredTokens("access", "refresh", "me@example.com"))
         val authorized = AuthorizedApi(http, "http://test.local", store, refresh = { false })
-        return ListDetailViewModel("list-1", TodosApi(authorized), scope)
+        return ListDetailViewModel("list-1", TodosApi(authorized), MembershipApi(authorized), scope)
     }
 
     @Test
     fun `load surfaces the lists todos`() = runTest {
-        val engine = MockEngine {
-            respond(
-                """[{"id":"t1","listId":"list-1","title":"Milk","completed":false,"order":1.0,"createdAt":"2026-07-02T00:00:00Z"}]""",
-                HttpStatusCode.OK, jsonHeaders,
-            )
+        val engine = MockEngine { request ->
+            when {
+                request.url.encodedPath.endsWith("/members") ->
+                    respond("[]", HttpStatusCode.OK, jsonHeaders)
+                else -> respond(
+                    """[{"id":"t1","listId":"list-1","title":"Milk","completed":false,"order":1.0,"createdAt":"2026-07-02T00:00:00Z"}]""",
+                    HttpStatusCode.OK, jsonHeaders,
+                )
+            }
         }
         val vm = viewModel(this, engine)
 
@@ -89,6 +94,8 @@ class ListDetailViewModelTest {
         var toggled = false
         val engine = MockEngine { request ->
             when {
+                request.url.encodedPath.endsWith("/members") ->
+                    respond("[]", HttpStatusCode.OK, jsonHeaders)
                 request.method == HttpMethod.Put &&
                     request.url.encodedPath.contains("/todos/") &&
                     !request.url.encodedPath.endsWith("/reorder") -> {
@@ -118,6 +125,8 @@ class ListDetailViewModelTest {
         var deleted = false
         val engine = MockEngine { request ->
             when {
+                request.url.encodedPath.endsWith("/members") ->
+                    respond("[]", HttpStatusCode.OK, jsonHeaders)
                 request.method == HttpMethod.Delete &&
                     request.url.encodedPath.contains("/todos/") -> {
                     deleted = true
@@ -136,6 +145,53 @@ class ListDetailViewModelTest {
         vm.delete(vm.state.value.todos.first()).join()
 
         assertTrue(vm.state.value.todos.isEmpty())
+    }
+
+    @Test
+    fun `load surfaces members for the assignee picker`() = runTest {
+        val engine = MockEngine { request ->
+            when {
+                request.url.encodedPath.endsWith("/members") -> respond(
+                    """[{"userId":"u1","email":"owner@x.com","role":"OWNER"},
+                       {"userId":"u2","email":"ed@x.com","role":"EDITOR"}]""",
+                    HttpStatusCode.OK, jsonHeaders,
+                )
+                else -> respond("[]", HttpStatusCode.OK, jsonHeaders)
+            }
+        }
+        val vm = viewModel(this, engine)
+
+        vm.load().join()
+
+        assertEquals(listOf("owner@x.com", "ed@x.com"), vm.state.value.members.map { it.email })
+    }
+
+    @Test
+    fun `assign puts the assignee then refetches the todos`() = runTest {
+        var assigned = false
+        val engine = MockEngine { request ->
+            when {
+                request.method == HttpMethod.Put && request.url.encodedPath.endsWith("/assignee") -> {
+                    assigned = true
+                    respond("""{"id":"t1","listId":"list-1","title":"Milk","completed":false,"order":1.0,"createdAt":"t","assigneeUserId":"u2","assigneeEmail":"ed@x.com"}""",
+                        HttpStatusCode.OK, jsonHeaders)
+                }
+                request.url.encodedPath.endsWith("/members") ->
+                    respond("[]", HttpStatusCode.OK, jsonHeaders)
+                else -> respond(
+                    if (assigned)
+                        """[{"id":"t1","listId":"list-1","title":"Milk","completed":false,"order":1.0,"createdAt":"t","assigneeUserId":"u2","assigneeEmail":"ed@x.com"}]"""
+                    else """[{"id":"t1","listId":"list-1","title":"Milk","completed":false,"order":1.0,"createdAt":"t"}]""",
+                    HttpStatusCode.OK, jsonHeaders,
+                )
+            }
+        }
+        val vm = viewModel(this, engine)
+        vm.load().join()
+
+        vm.assign(vm.state.value.todos.first(), "u2").join()
+
+        assertEquals("ed@x.com", vm.state.value.todos.first().assigneeEmail)
     }
 
     @Test

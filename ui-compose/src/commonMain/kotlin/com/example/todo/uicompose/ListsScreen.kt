@@ -96,6 +96,9 @@ fun ListsApp(container: AppContainer, onSignOut: () -> Unit) {
             onSave = { todo, t, d, dt -> detailViewModel.update(todo, t, d, dt) },
             onDelete = { detailViewModel.delete(it) },
             onReorder = { id, before -> detailViewModel.reorder(id, before) },
+            onAssign = { todo, assignee -> detailViewModel.assign(todo, assignee) },
+            onToggleAssignedToMe = { detailViewModel.setAssignedToMeOnly(it) },
+            currentEmail = remember { container.currentEmail() },
             onOpenMembers = { showingMembers = true },
         )
     }
@@ -318,15 +321,24 @@ fun ListDetail(
     onSave: (TodoDto, String, String?, String?) -> Unit,
     onDelete: (TodoDto) -> Unit,
     onReorder: (String, String?) -> Unit,
+    onAssign: (TodoDto, String?) -> Unit = { _, _ -> },
+    onToggleAssignedToMe: (Boolean) -> Unit = {},
+    currentEmail: String? = null,
     onOpenMembers: (() -> Unit)? = null,
     showBackButton: Boolean = true,
 ) {
-    val active = state.todos.filterNot { it.completed }
-    val done = state.todos.filter { it.completed }
+    val shown =
+        if (state.assignedToMeOnly) state.todos.filter { it.assigneeEmail != null && it.assigneeEmail == currentEmail }
+        else state.todos
+    val active = shown.filterNot { it.completed }
+    val done = shown.filter { it.completed }
     val doneCount = done.size
-    val total = state.todos.size
+    val total = shown.size
     val progress = if (total == 0) 0f else doneCount.toFloat() / total
     var completedExpanded by remember { mutableStateOf(false) }
+    // Reorder against a filtered subset would move a Todo relative to a partial
+    // list, so it's only offered on the full, unfiltered view.
+    val canReorder = !state.assignedToMeOnly
 
     Column(modifier = Modifier.fillMaxSize()) {
         // Header ribbon
@@ -362,8 +374,19 @@ fun ListDetail(
 
         ErrorText(state.error)
 
-        if (state.todos.isEmpty()) {
-            EmptyTodos()
+        AssignedToMeToggle(state.assignedToMeOnly, onToggleAssignedToMe)
+
+        if (shown.isEmpty()) {
+            if (state.assignedToMeOnly) {
+                Text(
+                    "Nothing is assigned to you in this list.",
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.padding(horizontal = 24.dp, vertical = 16.dp),
+                )
+            } else {
+                EmptyTodos()
+            }
         } else {
             LazyColumn(
                 modifier = Modifier.fillMaxWidth().padding(horizontal = 24.dp),
@@ -379,17 +402,24 @@ fun ListDetail(
                 items(active, key = { it.id }) { todo ->
                     TodoRow(
                         todo = todo,
+                        members = state.members,
+                        currentEmail = currentEmail,
                         onToggle = { onToggle(todo) },
                         onSave = { title, desc, due -> onSave(todo, title, desc, due) },
                         onDelete = { onDelete(todo) },
-                        onMoveUp = {
-                            val idx = active.indexOfFirst { it.id == todo.id }
-                            if (idx > 0) onReorder(todo.id, active[idx - 1].id)
+                        onAssign = { onAssign(todo, it) },
+                        onMoveUp = if (!canReorder) null else {
+                            {
+                                val idx = active.indexOfFirst { it.id == todo.id }
+                                if (idx > 0) onReorder(todo.id, active[idx - 1].id)
+                            }
                         },
-                        onMoveDown = {
-                            val idx = active.indexOfFirst { it.id == todo.id }
-                            if (idx >= 0 && idx < active.size - 1)
-                                onReorder(todo.id, active.getOrNull(idx + 2)?.id)
+                        onMoveDown = if (!canReorder) null else {
+                            {
+                                val idx = active.indexOfFirst { it.id == todo.id }
+                                if (idx >= 0 && idx < active.size - 1)
+                                    onReorder(todo.id, active.getOrNull(idx + 2)?.id)
+                            }
                         },
                     )
                 }
@@ -403,9 +433,12 @@ fun ListDetail(
                         items(done, key = { it.id }) { todo ->
                             TodoRow(
                                 todo = todo,
+                                members = state.members,
+                                currentEmail = currentEmail,
                                 onToggle = { onToggle(todo) },
                                 onSave = { title, desc, due -> onSave(todo, title, desc, due) },
                                 onDelete = { onDelete(todo) },
+                                onAssign = { onAssign(todo, it) },
                                 onMoveUp = null,
                                 onMoveDown = null,
                             )
@@ -545,9 +578,12 @@ private fun AddTodoRow(onAdd: (String, String?, String?) -> Unit) {
 @Composable
 private fun TodoRow(
     todo: TodoDto,
+    members: List<MemberDto>,
+    currentEmail: String?,
     onToggle: () -> Unit,
     onSave: (String, String?, String?) -> Unit,
     onDelete: () -> Unit,
+    onAssign: (String?) -> Unit,
     onMoveUp: (() -> Unit)?,
     onMoveDown: (() -> Unit)?,
 ) {
@@ -642,6 +678,12 @@ private fun TodoRow(
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                         )
                     }
+                    AssigneeChip(
+                        todo = todo,
+                        members = members,
+                        currentEmail = currentEmail,
+                        onAssign = onAssign,
+                    )
                 }
 
                 // Reorder buttons — only for reorderable (active) rows.
@@ -673,6 +715,72 @@ private fun TodoRow(
                     }
                 }
             }
+        }
+    }
+}
+
+/** A small tappable assignee label that opens a member picker (slice 6). */
+@Composable
+private fun AssigneeChip(
+    todo: TodoDto,
+    members: List<MemberDto>,
+    currentEmail: String?,
+    onAssign: (String?) -> Unit,
+) {
+    var open by remember { mutableStateOf(false) }
+    val label = when {
+        todo.assigneeEmail == null -> "Assign"
+        todo.assigneeEmail == currentEmail -> "Assigned to you"
+        else -> "Assigned to ${todo.assigneeEmail}"
+    }
+    Box {
+        TextButton(
+            onClick = { open = true },
+            contentPadding = PaddingValues(horizontal = 4.dp, vertical = 0.dp),
+        ) {
+            Text(
+                "◍ $label",
+                style = MaterialTheme.typography.labelSmall,
+                color = if (todo.assigneeEmail == null) MaterialTheme.colorScheme.onSurfaceVariant
+                else MaterialTheme.colorScheme.primary,
+            )
+        }
+        DropdownMenu(expanded = open, onDismissRequest = { open = false }) {
+            DropdownMenuItem(
+                text = { Text("Unassigned") },
+                onClick = { open = false; onAssign(null) },
+            )
+            members.forEach { member ->
+                val me = member.email == currentEmail
+                DropdownMenuItem(
+                    text = { Text(member.email + if (me) " (you)" else "") },
+                    onClick = { open = false; onAssign(member.userId) },
+                )
+            }
+        }
+    }
+}
+
+/** The "Assigned to me" filter toggle shown above the Todo list (slice 6). */
+@Composable
+private fun AssignedToMeToggle(active: Boolean, onToggle: (Boolean) -> Unit) {
+    Row(
+        modifier = Modifier.fillMaxWidth().padding(horizontal = 24.dp, vertical = 4.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Surface(
+            color = if (active) MaterialTheme.colorScheme.primary
+            else MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f),
+            shape = MaterialTheme.shapes.small,
+            onClick = { onToggle(!active) },
+        ) {
+            Text(
+                if (active) "✓ Assigned to me" else "Assigned to me",
+                style = MaterialTheme.typography.labelMedium,
+                color = if (active) MaterialTheme.colorScheme.onPrimary
+                else MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp),
+            )
         }
     }
 }

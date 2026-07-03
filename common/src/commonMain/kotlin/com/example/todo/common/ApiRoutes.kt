@@ -28,6 +28,9 @@ object ApiRoutes {
     /** Path to reorder a Todo within its List. */
     fun todoReorder(listId: String, todoId: String) = "${todo(listId, todoId)}/reorder"
 
+    /** Path to assign/unassign a Todo (slice 6). */
+    fun todoAssignee(listId: String, todoId: String) = "${todo(listId, todoId)}/assignee"
+
     // Membership & sharing (slice 5)
 
     /** Members of a List. */

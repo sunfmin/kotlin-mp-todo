@@ -19,6 +19,10 @@ data class TodoDto(
     /** Fractional ordering key within the List; sort ascending. */
     val order: Double,
     val createdAt: String,
+    /** The member this Todo is assigned to, or null when unassigned (slice 6). */
+    val assigneeUserId: String? = null,
+    /** The assignee's email, for display; null when unassigned. */
+    val assigneeEmail: String? = null,
 )
 
 @Serializable
@@ -34,6 +38,16 @@ data class UpdateTodoRequest(
     val description: String? = null,
     val dueDate: String? = null,
     val completed: Boolean? = null,
+)
+
+/**
+ * Assign a Todo to a member of its List, or unassign it (slice 6). A dedicated
+ * endpoint (rather than a field on [UpdateTodoRequest]) makes null unambiguous:
+ * null [assigneeUserId] means "unassign", not "leave unchanged".
+ */
+@Serializable
+data class AssignTodoRequest(
+    val assigneeUserId: String? = null,
 )
 
 @Serializable

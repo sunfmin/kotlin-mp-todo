@@ -139,6 +139,9 @@ private fun MasterDetail(container: AppContainer, onSignOut: () -> Unit) {
                         onSave = { todo, t, d, dt -> detailVm.update(todo, t, d, dt) },
                         onDelete = { detailVm.delete(it) },
                         onReorder = { id, before -> detailVm.reorder(id, before) },
+                        onAssign = { todo, assignee -> detailVm.assign(todo, assignee) },
+                        onToggleAssignedToMe = { detailVm.setAssignedToMeOnly(it) },
+                        currentEmail = remember { container.currentEmail() },
                         onOpenMembers = { showingMembers = true },
                         showBackButton = false,
                     )

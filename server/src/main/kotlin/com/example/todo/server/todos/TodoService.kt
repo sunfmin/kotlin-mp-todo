@@ -6,6 +6,7 @@ import com.example.todo.common.TodoDto
 import com.example.todo.common.UpdateTodoRequest
 import com.example.todo.server.DomainException
 import com.example.todo.server.db.Todos
+import com.example.todo.server.db.Users
 import com.example.todo.server.membership.Members
 import kotlinx.datetime.Clock
 import kotlinx.datetime.Instant
@@ -23,11 +24,12 @@ import org.jetbrains.exposed.sql.update
 import java.util.UUID
 
 /**
- * Todos within a List (slice 4). Every operation first authorizes that the
- * caller owns the List — a user can only see and mutate Todos in Lists they
- * own. Ordering uses a fractional [Todos.orderKey]: appending picks the next
- * integer, and a move averages the neighbours' keys, so a reorder is always a
- * single-row UPDATE.
+ * Todos within a List (slice 4, extended with assignment in slice 6). Every
+ * operation authorizes that the caller is a member of the List (owner or editor,
+ * via [Members]). Ordering uses a fractional [Todos.orderKey]: appending picks
+ * the next integer and a move averages the neighbours' keys, so a reorder is
+ * always a single-row UPDATE. An assignee, when set, must be a current member of
+ * the Todo's List (ADR-0009).
  */
 class TodoService(private val clock: () -> Instant = { Clock.System.now() }) {
 
@@ -68,15 +70,47 @@ class TodoService(private val clock: () -> Instant = { Clock.System.now() }) {
     /** Todos in the List, ordered by [Todos.orderKey] ascending. */
     fun listForList(userId: UUID, listId: UUID): List<TodoDto> = transaction {
         Members.requireMember(userId, listId)
-        Todos.selectAll().where { Todos.listId eq listId }
+        val rows = Todos.selectAll().where { Todos.listId eq listId }
             .orderBy(Todos.orderKey to org.jetbrains.exposed.sql.SortOrder.ASC)
-            .map { it.toDto() }
+            .toList()
+        // Resolve assignee emails in one query rather than per row.
+        val emails = emailsFor(rows.mapNotNull { it[Todos.assigneeId] }.toSet())
+        rows.map { it.toDto(assigneeEmail = emails[it[Todos.assigneeId]]) }
     }
 
     fun get(userId: UUID, listId: UUID, todoId: UUID): TodoDto = transaction {
         Members.requireMember(userId, listId)
-        requireTodo(listId, todoId).toDto()
+        val row = requireTodo(listId, todoId)
+        row.toDto(assigneeEmail = emailOf(row[Todos.assigneeId]))
     }
+
+    /** Assign the Todo to a member of its List, or unassign it (assigneeUserId null). */
+    fun assign(userId: UUID, listId: UUID, todoId: UUID, assigneeUserId: String?): TodoDto =
+        transaction {
+            Members.requireMember(userId, listId)
+            val old = requireTodo(listId, todoId)
+            val assignee = assigneeUserId?.trim()?.takeIf { it.isNotEmpty() }?.let { raw ->
+                val id = runCatching { UUID.fromString(raw) }.getOrNull()
+                    ?: throw DomainException.badRequest("Invalid assignee id.")
+                if (Members.roleOf(id, listId) == null) {
+                    throw DomainException.badRequest("The assignee must be a member of this List.")
+                }
+                id
+            }
+            Todos.update({ Todos.id eq todoId }) { it[Todos.assigneeId] = assignee }
+            TodoDto(
+                id = todoId.toString(),
+                listId = listId.toString(),
+                title = old[Todos.title],
+                description = old[Todos.description],
+                dueDate = old[Todos.dueDate]?.toString(),
+                completed = old[Todos.completed],
+                order = old[Todos.orderKey],
+                createdAt = old[Todos.createdAt].toString(),
+                assigneeUserId = assignee?.toString(),
+                assigneeEmail = emailOf(assignee),
+            )
+        }
 
     fun update(userId: UUID, listId: UUID, todoId: UUID, req: UpdateTodoRequest): TodoDto =
         transaction {
@@ -109,6 +143,8 @@ class TodoService(private val clock: () -> Instant = { Clock.System.now() }) {
                 completed = newCompleted,
                 order = old[Todos.orderKey],
                 createdAt = old[Todos.createdAt].toString(),
+                assigneeUserId = old[Todos.assigneeId]?.toString(),
+                assigneeEmail = emailOf(old[Todos.assigneeId]),
             )
         }
 
@@ -153,7 +189,7 @@ class TodoService(private val clock: () -> Instant = { Clock.System.now() }) {
                 }
             }
 
-            old.toDto(orderOverride = newKey)
+            old.toDto(orderOverride = newKey, assigneeEmail = emailOf(old[Todos.assigneeId]))
         }
 
     /**
@@ -200,7 +236,17 @@ class TodoService(private val clock: () -> Instant = { Clock.System.now() }) {
             ?: throw DomainException.badRequest("Invalid due date; expected format yyyy-MM-dd.")
     }
 
-    private fun ResultRow.toDto(orderOverride: Double? = null) = TodoDto(
+    /** The email for a single user id, or null. */
+    private fun emailOf(userId: UUID?): String? =
+        userId?.let { Users.selectAll().where { Users.id eq it }.firstOrNull()?.get(Users.email) }
+
+    /** Emails for a set of user ids in one query (avoids N+1 on the list endpoint). */
+    private fun emailsFor(ids: Set<UUID>): Map<UUID, String> =
+        if (ids.isEmpty()) emptyMap()
+        else Users.select(Users.id, Users.email).where { Users.id inList ids }
+            .associate { it[Users.id] to it[Users.email] }
+
+    private fun ResultRow.toDto(orderOverride: Double? = null, assigneeEmail: String? = null) = TodoDto(
         id = this[Todos.id].toString(),
         listId = this[Todos.listId].toString(),
         title = this[Todos.title],
@@ -209,5 +255,7 @@ class TodoService(private val clock: () -> Instant = { Clock.System.now() }) {
         completed = this[Todos.completed],
         order = orderOverride ?: this[Todos.orderKey],
         createdAt = this[Todos.createdAt].toString(),
+        assigneeUserId = this[Todos.assigneeId]?.toString(),
+        assigneeEmail = assigneeEmail,
     )
 }

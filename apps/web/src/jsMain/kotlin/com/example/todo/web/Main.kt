@@ -215,17 +215,33 @@ private fun ListDetail(list: ListDto, container: AppContainer, onBack: () -> Uni
 
     state.error?.let { P { Text("⚠ $it") } }
 
-    if (state.todos.isEmpty()) {
-        P { Text("No todos yet. Add your first one above.") }
+    val currentEmail = remember { container.currentEmail() }
+    P {
+        CheckboxInput(checked = state.assignedToMeOnly, attrs = {
+            onClick { viewModel.setAssignedToMeOnly(!state.assignedToMeOnly) }
+        })
+        Span { Text(" Assigned to me only") }
+    }
+    val shown =
+        if (state.assignedToMeOnly) state.todos.filter { it.assigneeEmail != null && it.assigneeEmail == currentEmail }
+        else state.todos
+
+    if (shown.isEmpty()) {
+        P { Text(if (state.assignedToMeOnly) "Nothing assigned to you." else "No todos yet. Add your first one above.") }
     } else {
         Ul {
-            state.todos.forEachIndexed { idx, todo ->
+            shown.forEach { todo ->
+                val idx = state.todos.indexOfFirst { it.id == todo.id }
                 Li {
                     WebTodoRow(
                         todo = todo,
+                        members = state.members,
+                        currentEmail = currentEmail,
+                        reorderable = !state.assignedToMeOnly,
                         onToggle = { viewModel.toggle(todo) },
                         onSave = { title, desc, due -> viewModel.update(todo, title, desc, due) },
                         onDelete = { viewModel.delete(todo) },
+                        onAssign = { viewModel.assign(todo, it) },
                         onMoveUp = {
                             if (idx > 0) viewModel.reorder(todo.id, state.todos[idx - 1].id)
                         },
@@ -297,9 +313,13 @@ private fun WebMemberRow(member: MemberDto, viewerIsOwner: Boolean, isMe: Boolea
 @Composable
 private fun WebTodoRow(
     todo: TodoDto,
+    members: List<MemberDto>,
+    currentEmail: String?,
+    reorderable: Boolean,
     onToggle: () -> Unit,
     onSave: (String, String?, String?) -> Unit,
     onDelete: () -> Unit,
+    onAssign: (String?) -> Unit,
     onMoveUp: () -> Unit,
     onMoveDown: () -> Unit,
 ) {
@@ -337,9 +357,24 @@ private fun WebTodoRow(
             }
             Span { Text(" ") }
             Button(attrs = { onClick { editing = true } }) { Text("Edit") }
-            Button(attrs = { onClick { onMoveUp() } }) { Text("↑") }
-            Button(attrs = { onClick { onMoveDown() } }) { Text("↓") }
+            if (reorderable) {
+                Button(attrs = { onClick { onMoveUp() } }) { Text("↑") }
+                Button(attrs = { onClick { onMoveDown() } }) { Text("↓") }
+            }
             Button(attrs = { onClick { onDelete() } }) { Text("Delete") }
+        }
+        Div {
+            Span {
+                Text("Assignee: " + (todo.assigneeEmail?.let { it + if (it == currentEmail) " (you)" else "" } ?: "none") + " ")
+            }
+            members.forEach { m ->
+                if (m.userId != todo.assigneeUserId) {
+                    Button(attrs = { onClick { onAssign(m.userId) } }) { Text("→ ${m.email}") }
+                }
+            }
+            if (todo.assigneeUserId != null) {
+                Button(attrs = { onClick { onAssign(null) } }) { Text("Unassign") }
+            }
         }
     }
 }

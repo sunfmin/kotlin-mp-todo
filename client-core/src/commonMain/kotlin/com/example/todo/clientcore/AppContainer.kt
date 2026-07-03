@@ -37,7 +37,7 @@ class AppContainer(
     fun listsViewModel() = ListsViewModel(listsApi, membershipApi, scope)
 
     /** A fresh List-detail ViewModel for one List (call once per opened List). */
-    fun listDetailViewModel(listId: String) = ListDetailViewModel(listId, todosApi, scope)
+    fun listDetailViewModel(listId: String) = ListDetailViewModel(listId, todosApi, membershipApi, scope)
 
     /** A fresh members/sharing ViewModel for one List (call once per opened panel). */
     fun membersViewModel(listId: String, isOwner: Boolean) =

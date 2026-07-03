@@ -1,6 +1,8 @@
 package com.example.todo.clientcore.todos
 
+import com.example.todo.clientcore.net.MembershipApi
 import com.example.todo.clientcore.net.TodosApi
+import com.example.todo.common.MemberDto
 import com.example.todo.common.TodoDto
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
@@ -9,10 +11,14 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
 
-/** UI-facing state for a single List's detail (its Todos), slice 4. */
+/** UI-facing state for a single List's detail (its Todos), slice 4 + slice 6. */
 data class ListDetailState(
     val loading: Boolean = false,
     val todos: List<TodoDto> = emptyList(),
+    /** Members of the List, for the assignee picker (slice 6). */
+    val members: List<MemberDto> = emptyList(),
+    /** When true, the UI shows only Todos assigned to the current user (slice 6). */
+    val assignedToMeOnly: Boolean = false,
     val error: String? = null,
 )
 
@@ -25,6 +31,7 @@ data class ListDetailState(
 class ListDetailViewModel(
     private val listId: String,
     private val api: TodosApi,
+    private val membership: MembershipApi,
     private val scope: CoroutineScope,
 ) {
     private val _state = MutableStateFlow(ListDetailState())
@@ -33,7 +40,11 @@ class ListDetailViewModel(
     fun load(): Job = scope.launch {
         _state.value = _state.value.copy(loading = true, error = null)
         _state.value = try {
-            ListDetailState(loading = false, todos = api.all(listId))
+            _state.value.copy(
+                loading = false,
+                todos = api.all(listId),
+                members = membership.members(listId),
+            )
         } catch (e: Exception) {
             _state.value.copy(loading = false, error = e.message ?: "Could not load todos")
         }
@@ -49,6 +60,15 @@ class ListDetailViewModel(
         mutateThenReload { api.update(listId, todo.id, com.example.todo.common.UpdateTodoRequest(title, description, dueDate)) }
 
     fun delete(todo: TodoDto): Job = mutateThenReload { api.delete(listId, todo.id) }
+
+    /** Assign [todo] to a member, or unassign it when [assigneeUserId] is null (slice 6). */
+    fun assign(todo: TodoDto, assigneeUserId: String?): Job =
+        mutateThenReload { api.assign(listId, todo.id, assigneeUserId) }
+
+    /** Toggle the "assigned to me" filter (client-side view; no network). */
+    fun setAssignedToMeOnly(only: Boolean) {
+        _state.value = _state.value.copy(assignedToMeOnly = only)
+    }
 
     /** Move [todoId] to immediately before [beforeId] (null = end of list). */
     fun reorder(todoId: String, beforeId: String?): Job = mutateThenReload {

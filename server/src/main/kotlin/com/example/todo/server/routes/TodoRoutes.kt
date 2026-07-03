@@ -1,6 +1,7 @@
 package com.example.todo.server.routes
 
 import com.example.todo.common.ApiRoutes
+import com.example.todo.common.AssignTodoRequest
 import com.example.todo.common.CreateTodoRequest
 import com.example.todo.common.ReorderTodoRequest
 import com.example.todo.common.UpdateTodoRequest
@@ -52,6 +53,12 @@ fun Route.todoRoutes(todos: TodoService) {
                     val req = call.receive<ReorderTodoRequest>()
                     call.respond(
                         todos.reorder(call.userId(), call.uuidParam("listId"), call.uuidParam("todoId"), req),
+                    )
+                }
+                put("/assignee") {
+                    val req = call.receive<AssignTodoRequest>()
+                    call.respond(
+                        todos.assign(call.userId(), call.uuidParam("listId"), call.uuidParam("todoId"), req.assigneeUserId),
                     )
                 }
             }

@@ -1,6 +1,7 @@
 package com.example.todo.clientcore.net
 
 import com.example.todo.common.ApiRoutes
+import com.example.todo.common.AssignTodoRequest
 import com.example.todo.common.CreateTodoRequest
 import com.example.todo.common.ReorderTodoRequest
 import com.example.todo.common.TodoDto
@@ -24,4 +25,8 @@ class TodosApi(private val api: AuthorizedApi) {
 
     suspend fun reorder(listId: String, todoId: String, beforeId: String?): TodoDto =
         api.patch(ApiRoutes.todoReorder(listId, todoId), ReorderTodoRequest(beforeId)).body()
+
+    /** Assign the Todo to a member, or unassign it when [assigneeUserId] is null (slice 6). */
+    suspend fun assign(listId: String, todoId: String, assigneeUserId: String?): TodoDto =
+        api.put(ApiRoutes.todoAssignee(listId, todoId), AssignTodoRequest(assigneeUserId)).body()
 }

@@ -64,6 +64,8 @@ object Todos : Table("todos") {
     val completed = bool("completed").default(false)
     val orderKey = double("order_key")
     val createdAt = timestamp("created_at")
+    /** The assigned member (slice 6), or null when unassigned. */
+    val assigneeId = uuid("assignee_id").references(Users.id).nullable()
     override val primaryKey = PrimaryKey(id)
 }
 
