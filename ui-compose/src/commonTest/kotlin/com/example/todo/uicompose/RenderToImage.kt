@@ -20,9 +20,14 @@ import java.io.File
  * tree and encodes the result to a PNG file. Returns the absolute path.
  */
 @OptIn(ExperimentalTestApi::class)
-fun renderToImage(name: String, content: @Composable () -> Unit): String {
+fun renderToImage(
+    name: String,
+    width: Int = 400,
+    height: Int = 800,
+    content: @Composable () -> Unit,
+): String {
     lateinit var path: String
-    runDesktopComposeUiTest(width = 400, height = 800) {
+    runDesktopComposeUiTest(width = width, height = height) {
         setContent { MaterialTheme { Surface(modifier = Modifier.fillMaxSize()) { content() } } }
         val img: androidx.compose.ui.graphics.ImageBitmap = captureToImage()
         val pm = img.toPixelMap()

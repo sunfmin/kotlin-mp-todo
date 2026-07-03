@@ -25,7 +25,6 @@ import androidx.compose.ui.unit.dp
 import com.example.todo.clientcore.AppContainer
 import com.example.todo.clientcore.auth.AuthPhase
 import com.example.todo.clientcore.auth.AuthState
-import com.example.todo.clientcore.auth.AuthViewModel
 
 /**
  * Shared UI root (ADR-0001), used by Android, iOS, and Desktop. Web renders the
@@ -38,7 +37,12 @@ fun App(container: AppContainer) {
     MaterialTheme {
         Surface(modifier = Modifier.fillMaxSize()) {
             when (state.phase) {
-                AuthPhase.EMAIL, AuthPhase.CODE -> SignInScreen(state, container.authViewModel)
+                AuthPhase.EMAIL, AuthPhase.CODE -> SignInScreen(
+                    state = state,
+                    onSubmitEmail = { container.authViewModel.submitEmail(it) },
+                    onSubmitCode = { container.authViewModel.submitCode(it) },
+                    onChangeEmail = { container.authViewModel.changeEmail() },
+                )
                 AuthPhase.AUTHENTICATED -> ListsApp(container, onSignOut = { container.authViewModel.signOut() })
             }
         }
@@ -46,7 +50,12 @@ fun App(container: AppContainer) {
 }
 
 @Composable
-private fun SignInScreen(state: AuthState, viewModel: AuthViewModel) {
+fun SignInScreen(
+    state: AuthState,
+    onSubmitEmail: (String) -> Unit,
+    onSubmitCode: (String) -> Unit,
+    onChangeEmail: () -> Unit,
+) {
     Column(
         modifier = Modifier.fillMaxSize().padding(24.dp),
         horizontalAlignment = Alignment.CenterHorizontally,
@@ -55,11 +64,11 @@ private fun SignInScreen(state: AuthState, viewModel: AuthViewModel) {
         Text("Collaborative Todo", style = MaterialTheme.typography.headlineMedium)
         Column(modifier = Modifier.widthIn(max = 360.dp).padding(top = 24.dp)) {
             when (state.phase) {
-                AuthPhase.EMAIL -> EmailStep(state) { viewModel.submitEmail(it) }
+                AuthPhase.EMAIL -> EmailStep(state, onSubmit = onSubmitEmail)
                 AuthPhase.CODE -> CodeStep(
                     state,
-                    onSubmit = { viewModel.submitCode(it) },
-                    onChangeEmail = { viewModel.changeEmail() },
+                    onSubmit = onSubmitCode,
+                    onChangeEmail = onChangeEmail,
                 )
                 AuthPhase.AUTHENTICATED -> {}
             }
