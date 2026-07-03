@@ -55,6 +55,10 @@ class MembersViewModel(
     /** Owner removes another member. */
     fun removeMember(userId: String): Job = mutateThenReload { api.removeMember(listId, userId) }
 
+    /** Owner transfers ownership to another member (slice 7). */
+    fun transferOwnership(newOwnerUserId: String): Job =
+        mutateThenReload { api.transferOwnership(listId, newOwnerUserId) }
+
     private fun mutateThenReload(op: suspend () -> Unit): Job = scope.launch {
         _state.value = _state.value.copy(error = null)
         try {

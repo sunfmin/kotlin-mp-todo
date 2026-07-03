@@ -76,9 +76,12 @@ private fun ListsApp(container: AppContainer, onSignOut: () -> Unit) {
     val state by viewModel.state.collectAsState()
 
     var openList by remember { mutableStateOf<ListDto?>(null) }
+    var showingAccount by remember { mutableStateOf(false) }
     val current = openList?.let { o -> state.lists.firstOrNull { it.id == o.id } ?: o }
 
-    if (current == null) {
+    if (showingAccount) {
+        WebAccount(container, onBack = { showingAccount = false }, onDeleted = onSignOut)
+    } else if (current == null) {
         ListsIndex(
             lists = state.lists,
             error = state.error,
@@ -87,10 +90,29 @@ private fun ListsApp(container: AppContainer, onSignOut: () -> Unit) {
             onRename = { id, name -> viewModel.rename(id, name) },
             onDelete = { viewModel.delete(it) },
             onJoin = { viewModel.join(inviteTokenOf(it)) },
+            onManageAccount = { showingAccount = true },
             onSignOut = onSignOut,
         )
     } else {
         ListDetail(current, container) { openList = null }
+    }
+}
+
+@Composable
+private fun WebAccount(container: AppContainer, onBack: () -> Unit, onDeleted: () -> Unit) {
+    val vm = remember { container.accountViewModel() }
+    LaunchedEffect(Unit) { vm.loadBlockers() }
+    val state by vm.state.collectAsState()
+
+    Button(attrs = { onClick { onBack() } }) { Text("← Back") }
+    H2 { Text("Delete account") }
+    state.error?.let { P { Text("⚠ $it") } }
+    if (state.blockingLists.isNotEmpty()) {
+        P { Text("Transfer or delete these shared lists first:") }
+        Ul { state.blockingLists.forEach { Li { Text(it.name) } } }
+    } else {
+        P { Text("This permanently deletes your account and your solo lists.") }
+        Button(attrs = { onClick { vm.deleteAccount(onDeleted) } }) { Text("Delete my account") }
     }
 }
 
@@ -115,12 +137,14 @@ private fun ListsIndex(
     onRename: (String, String) -> Unit,
     onDelete: (String) -> Unit,
     onJoin: (String) -> Unit,
+    onManageAccount: () -> Unit,
     onSignOut: () -> Unit,
 ) {
     var newName by remember { mutableStateOf("") }
     var invite by remember { mutableStateOf("") }
     H2 { Text("Your lists") }
     Button(attrs = { onClick { onSignOut() } }) { Text("Sign out") }
+    Button(attrs = { onClick { onManageAccount() } }) { Text("Delete account") }
     P {
         TextInput(newName) { onInput { newName = it.value } }
         Button(attrs = {
@@ -287,7 +311,15 @@ private fun WebMembers(list: ListDto, container: AppContainer) {
 
         Ul {
             state.members.forEach { member ->
-                Li { WebMemberRow(member, isOwner, member.email == currentEmail) { vm.removeMember(member.userId) } }
+                Li {
+                    WebMemberRow(
+                        member = member,
+                        viewerIsOwner = isOwner,
+                        isMe = member.email == currentEmail,
+                        onRemove = { vm.removeMember(member.userId) },
+                        onTransfer = { vm.transferOwnership(member.userId) },
+                    )
+                }
             }
         }
 
@@ -301,11 +333,18 @@ private fun WebMembers(list: ListDto, container: AppContainer) {
 }
 
 @Composable
-private fun WebMemberRow(member: MemberDto, viewerIsOwner: Boolean, isMe: Boolean, onRemove: () -> Unit) {
+private fun WebMemberRow(
+    member: MemberDto,
+    viewerIsOwner: Boolean,
+    isMe: Boolean,
+    onRemove: () -> Unit,
+    onTransfer: () -> Unit,
+) {
     val roleLabel = if (member.role == Role.OWNER) "owner" else "editor"
     Span { Text("${member.email} ($roleLabel)${if (isMe) " (you)" else ""}") }
     if (viewerIsOwner && member.role != Role.OWNER) {
         Span { Text(" ") }
+        Button(attrs = { onClick { onTransfer() } }) { Text("Make owner") }
         Button(attrs = { onClick { onRemove() } }) { Text("Remove") }
     }
 }

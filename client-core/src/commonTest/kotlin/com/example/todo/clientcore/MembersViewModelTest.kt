@@ -164,6 +164,36 @@ class MembersViewModelTest {
     }
 
     @Test
+    fun `transfer ownership posts then refetches the members`() = runTest {
+        var transferred = false
+        val engine = MockEngine { request ->
+            when {
+                request.method == HttpMethod.Post && request.url.encodedPath.endsWith("/transfer") -> {
+                    transferred = true
+                    respond("""{"id":"list-1","name":"L","role":"EDITOR","createdAt":"t"}""",
+                        HttpStatusCode.OK, jsonHeaders)
+                }
+                request.url.encodedPath.endsWith("/members") -> respond(
+                    if (transferred)
+                        """[{"userId":"u2","email":"ed@x.com","role":"OWNER"},
+                            {"userId":"u1","email":"owner@x.com","role":"EDITOR"}]"""
+                    else """[{"userId":"u1","email":"owner@x.com","role":"OWNER"},
+                            {"userId":"u2","email":"ed@x.com","role":"EDITOR"}]""",
+                    HttpStatusCode.OK, jsonHeaders,
+                )
+                request.url.encodedPath.endsWith("/invite-link") ->
+                    respond("""{"message":"none"}""", HttpStatusCode.NotFound, jsonHeaders)
+                else -> respond("", HttpStatusCode.NotFound, headersOf())
+            }
+        }
+        val vm = viewModel(this, isOwner = true, engine)
+
+        vm.transferOwnership("u2").join()
+
+        assertEquals("u2", vm.state.value.members.first { it.role == com.example.todo.common.Role.OWNER }.userId)
+    }
+
+    @Test
     fun `a failed members load records an error`() = runTest {
         val engine = MockEngine {
             respond("""{"message":"boom"}""", HttpStatusCode.InternalServerError, jsonHeaders)

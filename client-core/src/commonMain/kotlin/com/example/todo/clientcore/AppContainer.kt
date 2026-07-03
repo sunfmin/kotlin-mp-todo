@@ -3,7 +3,9 @@ package com.example.todo.clientcore
 import com.example.todo.clientcore.auth.AuthViewModel
 import com.example.todo.clientcore.auth.TokenStore
 import com.example.todo.clientcore.lists.ListsViewModel
+import com.example.todo.clientcore.account.AccountViewModel
 import com.example.todo.clientcore.membership.MembersViewModel
+import com.example.todo.clientcore.net.AccountApi
 import com.example.todo.clientcore.net.AuthApi
 import com.example.todo.clientcore.net.AuthorizedApi
 import com.example.todo.clientcore.net.ListsApi
@@ -32,6 +34,7 @@ class AppContainer(
     private val listsApi = ListsApi(authorized)
     private val todosApi = TodosApi(authorized)
     private val membershipApi = MembershipApi(authorized)
+    private val accountApi = AccountApi(authorized)
 
     /** A fresh Lists index ViewModel (call once per authenticated session). */
     fun listsViewModel() = ListsViewModel(listsApi, membershipApi, scope)
@@ -42,6 +45,9 @@ class AppContainer(
     /** A fresh members/sharing ViewModel for one List (call once per opened panel). */
     fun membersViewModel(listId: String, isOwner: Boolean) =
         MembersViewModel(listId, isOwner, membershipApi, scope)
+
+    /** A fresh account-lifecycle ViewModel (call once per account screen). */
+    fun accountViewModel() = AccountViewModel(accountApi, scope)
 
     /** The signed-in User's email, used by the UI to find "me" in a member list. */
     fun currentEmail(): String? = store.load()?.email

@@ -9,6 +9,7 @@ import com.example.todo.server.DomainException
 import com.example.todo.server.db.InviteLinks
 import com.example.todo.server.db.Lists
 import com.example.todo.server.db.Memberships
+import com.example.todo.server.db.Todos
 import com.example.todo.server.db.Users
 import kotlinx.datetime.Clock
 import kotlinx.datetime.Instant
@@ -134,9 +135,39 @@ class MembershipService(private val clock: () -> Instant = { Clock.System.now() 
             }
         }
 
+        // Auto-unassign the departing member's Todos in this List (ADR-0009);
+        // removal is never blocked on reassignment.
+        Todos.update({ (Todos.listId eq listId) and (Todos.assigneeId eq targetUserId) }) {
+            it[Todos.assigneeId] = null
+        }
         Memberships.deleteWhere {
             (Memberships.listId eq listId) and (Memberships.userId eq targetUserId)
         }
+    }
+
+    /**
+     * Transfer ownership to another current member (ADR-0009). The new owner must
+     * already be an Editor of the List; afterwards they are the sole Owner and the
+     * previous Owner becomes an Editor. Returns the List from the caller's new
+     * (Editor) perspective.
+     */
+    fun transferOwnership(callerId: UUID, listId: UUID, newOwnerUserId: String): ListDto = transaction {
+        Members.requireOwner(callerId, listId)
+        val newOwner = runCatching { UUID.fromString(newOwnerUserId) }.getOrNull()
+            ?: throw DomainException.badRequest("Invalid user id.")
+        if (Members.roleOf(newOwner, listId) != Role.EDITOR) {
+            throw DomainException.badRequest("The new owner must be a member of this List.")
+        }
+        Lists.update({ Lists.id eq listId }) { it[Lists.ownerId] = newOwner }
+        // The new owner is no longer an editor row; the old owner becomes one.
+        Memberships.deleteWhere { (Memberships.listId eq listId) and (Memberships.userId eq newOwner) }
+        Memberships.insert {
+            it[Memberships.listId] = listId
+            it[Memberships.userId] = callerId
+            it[createdAt] = clock()
+        }
+        val row = Lists.selectAll().where { Lists.id eq listId }.single()
+        ListDto(listId.toString(), row[Lists.name], Role.EDITOR, row[Lists.createdAt].toString())
     }
 
     /** The active, unexpired link for a List (owner-facing lookup). */

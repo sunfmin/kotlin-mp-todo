@@ -11,6 +11,14 @@ object ApiRoutes {
     const val AUTH_SIGNOUT = "/auth/signout"
     const val ME = "/me"
 
+    // Account lifecycle (slice 7)
+
+    /** DELETE removes the User's account (blocked while they own shared Lists). */
+    const val ACCOUNT = "/me/account"
+
+    /** GET the shared Lists that currently block account deletion. */
+    const val ACCOUNT_DELETION_BLOCKERS = "/me/account/deletion-blockers"
+
     // Lists (slice 3)
     const val LISTS = "/lists"
 
@@ -41,6 +49,9 @@ object ApiRoutes {
 
     /** The List's single Invite Link (GET current, POST regenerate, DELETE revoke). */
     fun inviteLink(listId: String) = "${list(listId)}/invite-link"
+
+    /** Transfer ownership of a List to another member (slice 7). */
+    fun listTransfer(listId: String) = "${list(listId)}/transfer"
 
     /** Base path for following an Invite Link by its token. */
     const val INVITE = "/invite"

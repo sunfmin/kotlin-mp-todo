@@ -26,6 +26,16 @@ data class InviteLinkDto(
     val expiresAt: String? = null,
 )
 
+/**
+ * Transfer a List's ownership to another current member (slice 7). The named
+ * member becomes the sole Owner and the previous Owner becomes an Editor,
+ * preserving the "exactly one Owner" invariant (ADR-0009).
+ */
+@Serializable
+data class TransferOwnershipRequest(
+    val newOwnerUserId: String,
+)
+
 /** Regenerate/generate the List's Invite Link, revoking any prior one. */
 @Serializable
 data class CreateInviteLinkRequest(

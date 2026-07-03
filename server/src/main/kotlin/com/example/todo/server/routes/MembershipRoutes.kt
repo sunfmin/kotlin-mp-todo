@@ -2,6 +2,7 @@ package com.example.todo.server.routes
 
 import com.example.todo.common.ApiRoutes
 import com.example.todo.common.CreateInviteLinkRequest
+import com.example.todo.common.TransferOwnershipRequest
 import com.example.todo.server.membership.MembershipService
 import com.example.todo.server.plugins.AUTH_JWT
 import io.ktor.http.HttpStatusCode
@@ -50,6 +51,11 @@ fun Route.membershipRoutes(membership: MembershipService) {
                 membership.revokeInviteLink(call.userId(), call.uuidParam("listId"))
                 call.respond(HttpStatusCode.NoContent)
             }
+        }
+
+        post("${ApiRoutes.LISTS}/{listId}/transfer") {
+            val req = call.receive<TransferOwnershipRequest>()
+            call.respond(membership.transferOwnership(call.userId(), call.uuidParam("listId"), req.newOwnerUserId))
         }
 
         route("${ApiRoutes.INVITE}/{token}") {

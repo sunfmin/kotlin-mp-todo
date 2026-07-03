@@ -65,8 +65,11 @@ fun ListsApp(container: AppContainer, onSignOut: () -> Unit) {
     var openList by remember { mutableStateOf<ListDto?>(null) }
     val current = openList?.let { o -> state.lists.firstOrNull { it.id == o.id } ?: o }
     var showingMembers by remember(current?.id) { mutableStateOf(false) }
+    var showingAccount by remember { mutableStateOf(false) }
 
-    if (current == null) {
+    if (current == null && showingAccount) {
+        AccountHost(container, onBack = { showingAccount = false }, onDeleted = onSignOut)
+    } else if (current == null) {
         ListsIndex(
             lists = state.lists,
             error = state.error,
@@ -75,6 +78,7 @@ fun ListsApp(container: AppContainer, onSignOut: () -> Unit) {
             onRename = { id, name -> viewModel.rename(id, name) },
             onDelete = { id -> viewModel.delete(id) },
             onJoin = { viewModel.join(inviteTokenOf(it)) },
+            onManageAccount = { showingAccount = true },
             onSignOut = onSignOut,
         )
     } else if (showingMembers) {
@@ -129,6 +133,11 @@ fun MembersHost(
         onGenerate = { vm.generateInviteLink() },
         onRevoke = { vm.revokeInviteLink() },
         onRemove = { vm.removeMember(it) },
+        onTransfer = { newOwnerId ->
+            // After handing off ownership the caller is only an editor; return to
+            // the index and reload so their role is refreshed everywhere.
+            vm.transferOwnership(newOwnerId).invokeOnCompletion { onLeft() }
+        },
         onLeave = {
             val me = vm.state.value.members.firstOrNull { m -> m.email == currentEmail }
             if (me != null) vm.removeMember(me.userId).also { job -> job.invokeOnCompletion { onLeft() } }
@@ -146,6 +155,7 @@ fun ListsIndex(
     onDelete: (String) -> Unit,
     onSignOut: () -> Unit,
     onJoin: (String) -> Unit = {},
+    onManageAccount: (() -> Unit)? = null,
     selectedId: String? = null,
 ) {
     var newName by remember { mutableStateOf("") }
@@ -213,10 +223,16 @@ fun ListsIndex(
         }
         JoinListRow(onJoin = onJoin)
 
-        TextButton(
-            onClick = onSignOut,
-            modifier = Modifier.padding(top = 12.dp),
-        ) { Text("Sign out", style = MaterialTheme.typography.bodySmall) }
+        Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(top = 12.dp)) {
+            TextButton(onClick = onSignOut) {
+                Text("Sign out", style = MaterialTheme.typography.bodySmall)
+            }
+            if (onManageAccount != null) {
+                TextButton(onClick = onManageAccount) {
+                    Text("Delete account", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.error)
+                }
+            }
+        }
     }
 }
 
@@ -835,6 +851,7 @@ fun MembersScreen(
     onGenerate: () -> Unit,
     onRevoke: () -> Unit,
     onRemove: (String) -> Unit,
+    onTransfer: (String) -> Unit,
     onLeave: () -> Unit,
 ) {
     Column(modifier = Modifier.fillMaxSize()) {
@@ -878,8 +895,9 @@ fun MembersScreen(
                     MemberRow(
                         member = member,
                         isMe = member.email == currentEmail,
-                        canRemove = isOwner && member.role != Role.OWNER,
+                        canManage = isOwner && member.role != Role.OWNER,
                         onRemove = { onRemove(member.userId) },
+                        onTransfer = { onTransfer(member.userId) },
                     )
                 }
             }
@@ -950,8 +968,9 @@ private fun InviteLinkCard(
 private fun MemberRow(
     member: MemberDto,
     isMe: Boolean,
-    canRemove: Boolean,
+    canManage: Boolean,
     onRemove: () -> Unit,
+    onTransfer: () -> Unit,
 ) {
     Surface(
         modifier = Modifier.fillMaxWidth(),
@@ -975,9 +994,94 @@ private fun MemberRow(
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
             }
-            if (canRemove) {
+            if (canManage) {
+                TextButton(onClick = onTransfer) {
+                    Text("Make owner", style = MaterialTheme.typography.labelSmall)
+                }
                 IconButton(onClick = onRemove, modifier = Modifier.size(32.dp)) {
                     Text("×", style = MaterialTheme.typography.titleMedium, color = MaterialTheme.colorScheme.error)
+                }
+            }
+        }
+    }
+}
+
+/** Wires an [com.example.todo.clientcore.account.AccountViewModel] for the delete-account flow. */
+@Composable
+fun AccountHost(container: AppContainer, onBack: () -> Unit, onDeleted: () -> Unit) {
+    val vm = remember { container.accountViewModel() }
+    LaunchedEffect(Unit) { vm.loadBlockers() }
+    AccountScreen(
+        state = vm.state.collectAsState().value,
+        onBack = onBack,
+        onDelete = { vm.deleteAccount(onDeleted) },
+    )
+}
+
+/**
+ * Delete-account screen (slice 7). Lists the shared Lists blocking deletion, or
+ * offers a confirm-to-delete when there are none.
+ */
+@Composable
+fun AccountScreen(
+    state: com.example.todo.clientcore.account.AccountState,
+    onBack: () -> Unit,
+    onDelete: () -> Unit,
+) {
+    var confirming by remember { mutableStateOf(false) }
+    Column(modifier = Modifier.fillMaxSize().padding(24.dp)) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            TextButton(onClick = onBack) { Text("← Back") }
+            Text("Delete account", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.SemiBold)
+        }
+
+        ErrorText(state.error)
+
+        if (state.blockingLists.isNotEmpty()) {
+            Text(
+                "Transfer or delete these shared lists before deleting your account:",
+                style = MaterialTheme.typography.bodyMedium,
+                modifier = Modifier.padding(top = 16.dp),
+            )
+            LazyColumn(
+                modifier = Modifier.padding(top = 8.dp),
+                verticalArrangement = Arrangement.spacedBy(2.dp),
+            ) {
+                items(state.blockingLists, key = { it.id }) { list ->
+                    Surface(
+                        modifier = Modifier.fillMaxWidth(),
+                        color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.3f),
+                        shape = MaterialTheme.shapes.small,
+                    ) {
+                        Text(list.name, modifier = Modifier.padding(12.dp))
+                    }
+                }
+            }
+        } else {
+            Text(
+                "This permanently deletes your account and your solo lists. Shared lists you own must be transferred or deleted first.",
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.padding(top = 16.dp),
+            )
+            if (!confirming) {
+                Button(
+                    onClick = { confirming = true },
+                    modifier = Modifier.padding(top = 16.dp),
+                ) { Text("Delete my account") }
+            } else {
+                Text(
+                    "Are you sure? This cannot be undone.",
+                    style = MaterialTheme.typography.bodyMedium,
+                    fontWeight = FontWeight.SemiBold,
+                    modifier = Modifier.padding(top = 16.dp),
+                )
+                Row(modifier = Modifier.padding(top = 8.dp)) {
+                    Button(
+                        onClick = onDelete,
+                        enabled = !state.loading,
+                    ) { Text("Yes, delete", color = MaterialTheme.colorScheme.onError) }
+                    TextButton(onClick = { confirming = false }) { Text("Cancel") }
                 }
             }
         }

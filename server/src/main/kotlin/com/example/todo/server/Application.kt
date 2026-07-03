@@ -3,6 +3,7 @@ package com.example.todo.server
 import com.example.todo.server.auth.AuthConfig
 import com.example.todo.server.auth.AuthService
 import com.example.todo.server.auth.JwtSupport
+import com.example.todo.server.account.AccountService
 import com.example.todo.server.lists.ListService
 import com.example.todo.server.membership.MembershipService
 import com.example.todo.server.todos.TodoService
@@ -10,6 +11,7 @@ import com.example.todo.server.plugins.DatabaseFactory
 import com.example.todo.server.plugins.configureAuthentication
 import com.example.todo.server.plugins.configureSerialization
 import com.example.todo.server.plugins.configureStatusPages
+import com.example.todo.server.routes.accountRoutes
 import com.example.todo.server.routes.authRoutes
 import com.example.todo.server.routes.healthRoutes
 import com.example.todo.server.routes.listRoutes
@@ -54,6 +56,7 @@ fun Application.module() {
     val listService = ListService()
     val todoService = TodoService()
     val membershipService = MembershipService()
+    val accountService = AccountService()
 
     // Dev CORS so the Compose HTML web client (served from a different origin/port)
     // can call the API. Tighten to specific hosts before production.
@@ -78,6 +81,7 @@ fun Application.module() {
         listRoutes(listService)
         todoRoutes(todoService)
         membershipRoutes(membershipService)
+        accountRoutes(accountService)
     }
 }
 

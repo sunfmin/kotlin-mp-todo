@@ -29,6 +29,7 @@ import com.example.todo.clientcore.lists.ListsViewModel
 import com.example.todo.clientcore.net.ApiClient
 import com.example.todo.common.ListDto
 import com.example.todo.common.inviteTokenOf
+import com.example.todo.uicompose.AccountHost
 import com.example.todo.uicompose.ListsIndex
 import com.example.todo.uicompose.ListDetail
 import com.example.todo.uicompose.MembersHost
@@ -72,6 +73,7 @@ private fun MasterDetail(container: AppContainer, onSignOut: () -> Unit) {
     val listsState by listsVm.state.collectAsState()
 
     var selectedList by remember { mutableStateOf<ListDto?>(null) }
+    var showingAccount by remember { mutableStateOf(false) }
     // Keep selection fresh after renames
     val current = selectedList?.let { s -> listsState.lists.firstOrNull { it.id == s.id } ?: s }
 
@@ -90,7 +92,7 @@ private fun MasterDetail(container: AppContainer, onSignOut: () -> Unit) {
             ListsIndex(
                 lists = listsState.lists,
                 error = listsState.error,
-                onOpen = { selectedList = it },
+                onOpen = { selectedList = it; showingAccount = false },
                 onCreate = { listsVm.create(it) },
                 onRename = { id, name -> listsVm.rename(id, name) },
                 onDelete = { id ->
@@ -98,8 +100,9 @@ private fun MasterDetail(container: AppContainer, onSignOut: () -> Unit) {
                     if (selectedList?.id == id) selectedList = null
                 },
                 onJoin = { listsVm.join(inviteTokenOf(it)) },
+                onManageAccount = { showingAccount = true },
                 onSignOut = onSignOut,
-                selectedId = current?.id,
+                selectedId = if (showingAccount) null else current?.id,
             )
         }
 
@@ -111,8 +114,16 @@ private fun MasterDetail(container: AppContainer, onSignOut: () -> Unit) {
                 .background(MaterialTheme.colorScheme.outlineVariant),
         )
 
-        // Right detail — Todos (or members) for selected list
-        if (current != null) {
+        // Right detail — account screen, or Todos/members for the selected list
+        if (showingAccount) {
+            Surface(modifier = Modifier.fillMaxSize()) {
+                AccountHost(
+                    container = container,
+                    onBack = { showingAccount = false },
+                    onDeleted = onSignOut,
+                )
+            }
+        } else if (current != null) {
             var showingMembers by remember(current.id) { mutableStateOf(false) }
             Surface(modifier = Modifier.fillMaxSize()) {
                 if (showingMembers) {

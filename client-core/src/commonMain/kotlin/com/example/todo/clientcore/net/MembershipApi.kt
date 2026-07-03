@@ -6,6 +6,7 @@ import com.example.todo.common.InviteLinkDto
 import com.example.todo.common.InvitePreviewDto
 import com.example.todo.common.ListDto
 import com.example.todo.common.MemberDto
+import com.example.todo.common.TransferOwnershipRequest
 import io.ktor.client.call.body
 
 /** Sharing & membership against the server (slice 5), authenticated via [AuthorizedApi]. */
@@ -33,6 +34,10 @@ class MembershipApi(private val api: AuthorizedApi) {
     suspend fun removeMember(listId: String, userId: String) {
         api.delete(ApiRoutes.member(listId, userId))
     }
+
+    /** Transfer ownership to another member; returns the List from the caller's new (Editor) view. */
+    suspend fun transferOwnership(listId: String, newOwnerUserId: String): ListDto =
+        api.post(ApiRoutes.listTransfer(listId), TransferOwnershipRequest(newOwnerUserId)).body()
 
     suspend fun preview(token: String): InvitePreviewDto =
         api.get(ApiRoutes.invitePreview(token)).body()
