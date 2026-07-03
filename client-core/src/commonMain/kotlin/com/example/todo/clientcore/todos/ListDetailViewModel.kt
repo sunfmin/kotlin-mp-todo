@@ -1,11 +1,14 @@
 package com.example.todo.clientcore.todos
 
+import com.example.todo.clientcore.net.ListChangeStream
 import com.example.todo.clientcore.net.MembershipApi
 import com.example.todo.clientcore.net.TodosApi
 import com.example.todo.common.MemberDto
 import com.example.todo.common.TodoDto
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -33,6 +36,8 @@ class ListDetailViewModel(
     private val api: TodosApi,
     private val membership: MembershipApi,
     private val scope: CoroutineScope,
+    /** Optional live-change source (slice 8); null disables real-time updates. */
+    private val changes: ListChangeStream? = null,
 ) {
     private val _state = MutableStateFlow(ListDetailState())
     val state: StateFlow<ListDetailState> = _state.asStateFlow()
@@ -70,6 +75,34 @@ class ListDetailViewModel(
         _state.value = _state.value.copy(assignedToMeOnly = only)
     }
 
+    /**
+     * Subscribe to live changes for this List and refetch on each notification
+     * (slice 8, ADR-0006). Runs until the calling coroutine is cancelled (e.g. the
+     * screen closes); reconnects after a dropped connection. No-op without a stream.
+     */
+    suspend fun observeChanges() {
+        val stream = changes ?: return
+        while (true) {
+            try {
+                stream.listChanges().collect { changedListId ->
+                    if (changedListId == listId) refetchTodos()
+                }
+            } catch (e: CancellationException) {
+                throw e
+            } catch (_: Exception) {
+                // Connection dropped; fall through to reconnect after a short backoff.
+            }
+            delay(RECONNECT_DELAY_MS)
+        }
+    }
+
+    private suspend fun refetchTodos() {
+        // A live update is best-effort; a transient failure is retried on the next one.
+        runCatching { api.all(listId) }.onSuccess { fresh ->
+            _state.value = _state.value.copy(todos = fresh)
+        }
+    }
+
     /** Move [todoId] to immediately before [beforeId] (null = end of list). */
     fun reorder(todoId: String, beforeId: String?): Job = mutateThenReload {
         api.reorder(listId, todoId, beforeId)
@@ -83,5 +116,9 @@ class ListDetailViewModel(
         } catch (e: Exception) {
             _state.value = _state.value.copy(error = e.message ?: "Something went wrong")
         }
+    }
+
+    private companion object {
+        const val RECONNECT_DELAY_MS = 2_000L
     }
 }

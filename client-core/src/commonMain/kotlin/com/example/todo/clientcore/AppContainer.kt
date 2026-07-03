@@ -10,6 +10,7 @@ import com.example.todo.clientcore.net.AuthApi
 import com.example.todo.clientcore.net.AuthorizedApi
 import com.example.todo.clientcore.net.ListsApi
 import com.example.todo.clientcore.net.MembershipApi
+import com.example.todo.clientcore.net.SseChangeStream
 import com.example.todo.clientcore.net.TodosApi
 import com.example.todo.clientcore.todos.ListDetailViewModel
 import io.ktor.client.HttpClient
@@ -35,12 +36,14 @@ class AppContainer(
     private val todosApi = TodosApi(authorized)
     private val membershipApi = MembershipApi(authorized)
     private val accountApi = AccountApi(authorized)
+    private val changeStream = SseChangeStream(http, authorized)
 
     /** A fresh Lists index ViewModel (call once per authenticated session). */
     fun listsViewModel() = ListsViewModel(listsApi, membershipApi, scope)
 
     /** A fresh List-detail ViewModel for one List (call once per opened List). */
-    fun listDetailViewModel(listId: String) = ListDetailViewModel(listId, todosApi, membershipApi, scope)
+    fun listDetailViewModel(listId: String) =
+        ListDetailViewModel(listId, todosApi, membershipApi, scope, changeStream)
 
     /** A fresh members/sharing ViewModel for one List (call once per opened panel). */
     fun membersViewModel(listId: String, isOwner: Boolean) =

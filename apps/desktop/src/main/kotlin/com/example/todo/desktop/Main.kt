@@ -140,6 +140,7 @@ private fun MasterDetail(container: AppContainer, onSignOut: () -> Unit) {
                 } else {
                     val detailVm = remember(current.id) { container.listDetailViewModel(current.id) }
                     LaunchedEffect(current.id) { detailVm.load() }
+                    LaunchedEffect(current.id) { detailVm.observeChanges() }
                     val detailState by detailVm.state.collectAsState()
                     ListDetail(
                         list = current,

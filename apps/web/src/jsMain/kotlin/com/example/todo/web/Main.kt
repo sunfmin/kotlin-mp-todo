@@ -199,6 +199,7 @@ private fun ListRow(
 private fun ListDetail(list: ListDto, container: AppContainer, onBack: () -> Unit) {
     val viewModel = remember(list.id) { container.listDetailViewModel(list.id) }
     LaunchedEffect(list.id) { viewModel.load() }
+    LaunchedEffect(list.id) { viewModel.observeChanges() }
     val state by viewModel.state.collectAsState()
 
     var showMembers by remember(list.id) { mutableStateOf(false) }

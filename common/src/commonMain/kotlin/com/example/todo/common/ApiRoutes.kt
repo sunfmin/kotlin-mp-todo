@@ -4,6 +4,12 @@ package com.example.todo.common
 object ApiRoutes {
     const val HEALTH = "/health"
 
+    /** Server-Sent Events stream of "List X changed" notifications (slice 8). */
+    const val EVENTS = "/events"
+
+    /** SSE event name for a List-changed notification (payload = the List id). */
+    const val EVENT_LIST_CHANGED = "list-changed"
+
     // Auth (slice 2)
     const val AUTH_OTP_REQUEST = "/auth/otp/request"
     const val AUTH_OTP_VERIFY = "/auth/otp/verify"

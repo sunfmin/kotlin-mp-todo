@@ -6,6 +6,7 @@ import com.example.todo.server.auth.JwtSupport
 import com.example.todo.server.account.AccountService
 import com.example.todo.server.lists.ListService
 import com.example.todo.server.membership.MembershipService
+import com.example.todo.server.realtime.ChangeNotifier
 import com.example.todo.server.todos.TodoService
 import com.example.todo.server.plugins.DatabaseFactory
 import com.example.todo.server.plugins.configureAuthentication
@@ -13,6 +14,7 @@ import com.example.todo.server.plugins.configureSerialization
 import com.example.todo.server.plugins.configureStatusPages
 import com.example.todo.server.routes.accountRoutes
 import com.example.todo.server.routes.authRoutes
+import com.example.todo.server.routes.eventRoutes
 import com.example.todo.server.routes.healthRoutes
 import com.example.todo.server.routes.listRoutes
 import com.example.todo.server.routes.meRoutes
@@ -26,6 +28,7 @@ import io.ktor.server.engine.embeddedServer
 import io.ktor.server.netty.Netty
 import io.ktor.server.plugins.cors.routing.CORS
 import io.ktor.server.routing.routing
+import io.ktor.server.sse.SSE
 
 fun main() {
     val port = System.getenv("PORT")?.toIntOrNull() ?: 8080
@@ -53,9 +56,10 @@ fun Application.module() {
     )
     val jwt = JwtSupport(authConfig)
     val authService = AuthService(authConfig, jwt)
-    val listService = ListService()
-    val todoService = TodoService()
-    val membershipService = MembershipService()
+    val notifier = ChangeNotifier()
+    val listService = ListService(notify = notifier::published)
+    val todoService = TodoService(notify = notifier::published)
+    val membershipService = MembershipService(notify = notifier::published)
     val accountService = AccountService()
 
     // Dev CORS so the Compose HTML web client (served from a different origin/port)
@@ -74,6 +78,7 @@ fun Application.module() {
     configureSerialization()
     configureStatusPages()
     configureAuthentication(jwt)
+    install(SSE)
     routing {
         healthRoutes()
         authRoutes(authService)
@@ -82,6 +87,7 @@ fun Application.module() {
         todoRoutes(todoService)
         membershipRoutes(membershipService)
         accountRoutes(accountService)
+        eventRoutes(notifier, jwt)
     }
 }
 

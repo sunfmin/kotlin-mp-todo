@@ -5,6 +5,7 @@ import com.example.todo.common.HealthResponse
 import io.ktor.client.HttpClient
 import io.ktor.client.call.body
 import io.ktor.client.plugins.contentnegotiation.ContentNegotiation
+import io.ktor.client.plugins.sse.SSE
 import io.ktor.client.request.get
 import io.ktor.serialization.kotlinx.json.json
 import kotlinx.serialization.json.Json
@@ -23,11 +24,12 @@ class ApiClient(
         http.get(baseUrl.trimEnd('/') + ApiRoutes.HEALTH).body()
 
     companion object {
-        /** Adds JSON content negotiation to an engine-provided [HttpClient]. */
+        /** Adds JSON content negotiation and SSE support to an engine-provided [HttpClient]. */
         fun withJson(http: HttpClient): HttpClient = http.config {
             install(ContentNegotiation) {
                 json(Json { ignoreUnknownKeys = true })
             }
+            install(SSE)
         }
     }
 }

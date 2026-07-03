@@ -32,7 +32,11 @@ import java.util.UUID
  * the member list, and member removal/leave. All owner-only actions authorize
  * through [Members]; the server is the final authority (ADR-0002).
  */
-class MembershipService(private val clock: () -> Instant = { Clock.System.now() }) {
+class MembershipService(
+    private val clock: () -> Instant = { Clock.System.now() },
+    /** Called with a List id after a membership change, so subscribers can be notified (slice 8). */
+    private val notify: (UUID) -> Unit = {},
+) {
 
     /** Everyone in the List — Owner first, then Editors oldest-first. Any member may view. */
     fun members(userId: UUID, listId: UUID): List<MemberDto> = transaction {
@@ -101,6 +105,7 @@ class MembershipService(private val clock: () -> Instant = { Clock.System.now() 
                 it[createdAt] = clock()
             }
         }
+        notify(listId)
         val list = Lists.selectAll().where { Lists.id eq listId }.single()
         ListDto(
             id = listId.toString(),
@@ -143,6 +148,7 @@ class MembershipService(private val clock: () -> Instant = { Clock.System.now() 
         Memberships.deleteWhere {
             (Memberships.listId eq listId) and (Memberships.userId eq targetUserId)
         }
+        notify(listId)
     }
 
     /**
@@ -166,6 +172,7 @@ class MembershipService(private val clock: () -> Instant = { Clock.System.now() 
             it[Memberships.userId] = callerId
             it[createdAt] = clock()
         }
+        notify(listId)
         val row = Lists.selectAll().where { Lists.id eq listId }.single()
         ListDto(listId.toString(), row[Lists.name], Role.EDITOR, row[Lists.createdAt].toString())
     }

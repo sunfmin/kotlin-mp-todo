@@ -31,7 +31,11 @@ import java.util.UUID
  * always a single-row UPDATE. An assignee, when set, must be a current member of
  * the Todo's List (ADR-0009).
  */
-class TodoService(private val clock: () -> Instant = { Clock.System.now() }) {
+class TodoService(
+    private val clock: () -> Instant = { Clock.System.now() },
+    /** Called with a List id after any change, so subscribers can be notified (slice 8). */
+    private val notify: (UUID) -> Unit = {},
+) {
 
     fun create(userId: UUID, listId: UUID, req: CreateTodoRequest): TodoDto = transaction {
         Members.requireMember(userId, listId)
@@ -55,6 +59,7 @@ class TodoService(private val clock: () -> Instant = { Clock.System.now() }) {
             it[Todos.orderKey] = nextOrder
             it[createdAt] = now
         }
+        notify(listId)
         TodoDto(
             id = id.toString(),
             listId = listId.toString(),
@@ -98,6 +103,7 @@ class TodoService(private val clock: () -> Instant = { Clock.System.now() }) {
                 id
             }
             Todos.update({ Todos.id eq todoId }) { it[Todos.assigneeId] = assignee }
+            notify(listId)
             TodoDto(
                 id = todoId.toString(),
                 listId = listId.toString(),
@@ -134,6 +140,7 @@ class TodoService(private val clock: () -> Instant = { Clock.System.now() }) {
                 it[Todos.dueDate] = newDue
                 it[Todos.completed] = newCompleted
             }
+            notify(listId)
             TodoDto(
                 id = todoId.toString(),
                 listId = listId.toString(),
@@ -152,6 +159,7 @@ class TodoService(private val clock: () -> Instant = { Clock.System.now() }) {
         Members.requireMember(userId, listId)
         requireTodo(listId, todoId)
         Todos.deleteWhere { Todos.id eq todoId }
+        notify(listId)
     }
 
     fun reorder(userId: UUID, listId: UUID, todoId: UUID, req: ReorderTodoRequest): TodoDto =
@@ -189,6 +197,7 @@ class TodoService(private val clock: () -> Instant = { Clock.System.now() }) {
                 }
             }
 
+            notify(listId)
             old.toDto(orderOverride = newKey, assigneeEmail = emailOf(old[Todos.assigneeId]))
         }
 

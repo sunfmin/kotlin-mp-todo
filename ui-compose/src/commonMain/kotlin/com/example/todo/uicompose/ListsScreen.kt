@@ -91,6 +91,7 @@ fun ListsApp(container: AppContainer, onSignOut: () -> Unit) {
     } else {
         val detailViewModel = remember(current.id) { container.listDetailViewModel(current.id) }
         LaunchedEffect(current.id) { detailViewModel.load() }
+        LaunchedEffect(current.id) { detailViewModel.observeChanges() }
         ListDetail(
             list = current,
             state = detailViewModel.state.collectAsState().value,

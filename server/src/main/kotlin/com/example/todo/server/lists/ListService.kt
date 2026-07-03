@@ -23,7 +23,11 @@ import java.util.UUID
  * carries the caller's [Role]. Ownership is `owner_id` (single source of truth
  * for the "exactly one Owner" invariant, ADR-0009); rename/delete stay owner-only.
  */
-class ListService(private val clock: () -> Instant = { Clock.System.now() }) {
+class ListService(
+    private val clock: () -> Instant = { Clock.System.now() },
+    /** Called with a List id after a change, so subscribers can be notified (slice 8). */
+    private val notify: (UUID) -> Unit = {},
+) {
 
     fun create(ownerId: UUID, name: String): ListDto = transaction {
         val cleanName = validateName(name)
@@ -59,6 +63,7 @@ class ListService(private val clock: () -> Instant = { Clock.System.now() }) {
         val cleanName = validateName(name)
         Members.requireOwner(userId, listId)
         Lists.update({ Lists.id eq listId }) { it[Lists.name] = cleanName }
+        notify(listId)
         Lists.selectAll().where { Lists.id eq listId }.single().toDto(Role.OWNER)
     }
 
