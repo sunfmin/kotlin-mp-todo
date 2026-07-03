@@ -66,3 +66,31 @@ object Todos : Table("todos") {
     val createdAt = timestamp("created_at")
     override val primaryKey = PrimaryKey(id)
 }
+
+/**
+ * EDITOR memberships of a List (slice 5). The Owner is [Lists.ownerId], not a row
+ * here, so a member is either the owner (via that column) or an editor (via this
+ * table) but never both — keeping ADR-0009's single-Owner invariant structural.
+ * The (listId, userId) composite key makes a User a member of a List at most once.
+ */
+object Memberships : Table("memberships") {
+    val listId = uuid("list_id").references(Lists.id)
+    val userId = uuid("user_id").references(Users.id)
+    val createdAt = timestamp("created_at")
+    override val primaryKey = PrimaryKey(listId, userId)
+}
+
+/**
+ * Invite Links for a List (ADR-0004). [token] is the opaque value in the share
+ * URL. Regenerating flips the prior row's [active] to false and inserts a new
+ * active row; a partial unique index (migration) enforces at most one active
+ * link per List. [expiresAt] null means the link never expires.
+ */
+object InviteLinks : Table("invite_links") {
+    val token = uuid("token")
+    val listId = uuid("list_id").references(Lists.id)
+    val active = bool("active").default(true)
+    val expiresAt = timestamp("expires_at").nullable()
+    val createdAt = timestamp("created_at")
+    override val primaryKey = PrimaryKey(token)
+}

@@ -1,6 +1,7 @@
 package com.example.todo.clientcore.lists
 
 import com.example.todo.clientcore.net.ListsApi
+import com.example.todo.clientcore.net.MembershipApi
 import com.example.todo.common.ListDto
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
@@ -23,6 +24,7 @@ data class ListsState(
  */
 class ListsViewModel(
     private val api: ListsApi,
+    private val membership: MembershipApi,
     private val scope: CoroutineScope,
 ) {
     private val _state = MutableStateFlow(ListsState())
@@ -42,6 +44,9 @@ class ListsViewModel(
     fun rename(id: String, name: String): Job = mutateThenReload { api.rename(id, name) }
 
     fun delete(id: String): Job = mutateThenReload { api.delete(id) }
+
+    /** Follow an Invite Link token to join a shared List, then refresh the index (slice 5). */
+    fun join(token: String): Job = mutateThenReload { membership.join(token) }
 
     private fun mutateThenReload(op: suspend () -> Unit): Job = scope.launch {
         _state.value = _state.value.copy(error = null)

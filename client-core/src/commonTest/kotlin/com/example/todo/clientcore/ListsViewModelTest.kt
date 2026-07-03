@@ -4,6 +4,7 @@ import com.example.todo.clientcore.lists.ListsViewModel
 import com.example.todo.clientcore.net.ApiClient
 import com.example.todo.clientcore.net.AuthorizedApi
 import com.example.todo.clientcore.net.ListsApi
+import com.example.todo.clientcore.net.MembershipApi
 import com.example.todo.clientcore.auth.InMemoryTokenStore
 import com.example.todo.clientcore.auth.StoredTokens
 import com.example.todo.common.ApiRoutes
@@ -34,7 +35,7 @@ class ListsViewModelTest {
         val http = ApiClient.withJson(HttpClient(engine))
         val store = InMemoryTokenStore(StoredTokens("access", "refresh", "me@example.com"))
         val authorized = AuthorizedApi(http, "http://test.local", store, refresh = { false })
-        return ListsViewModel(ListsApi(authorized), scope)
+        return ListsViewModel(ListsApi(authorized), MembershipApi(authorized), scope)
     }
 
     @Test
@@ -77,6 +78,32 @@ class ListsViewModelTest {
         vm.create("Work").join()
 
         assertEquals(listOf("Work"), vm.state.value.lists.map { it.name })
+    }
+
+    @Test
+    fun `join follows a link then refetches the index with the joined list`() = runTest {
+        var joined = false
+        val engine = MockEngine { request ->
+            when {
+                request.method == HttpMethod.Post && request.url.encodedPath.endsWith("/join") -> {
+                    joined = true
+                    respond("""{"id":"9","name":"Shared","role":"EDITOR","createdAt":"t"}""",
+                        HttpStatusCode.OK, jsonHeaders)
+                }
+                else -> respond(
+                    if (joined) """[{"id":"9","name":"Shared","role":"EDITOR","createdAt":"t"}]"""
+                    else "[]",
+                    HttpStatusCode.OK, jsonHeaders,
+                )
+            }
+        }
+        val vm = viewModel(this, engine)
+
+        vm.join("tok-abc").join()
+
+        val shared = vm.state.value.lists.single()
+        assertEquals("Shared", shared.name)
+        assertEquals("EDITOR", shared.role)
     }
 
     @Test

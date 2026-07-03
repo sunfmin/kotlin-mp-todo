@@ -28,8 +28,10 @@ import com.example.todo.clientcore.auth.InMemoryTokenStore
 import com.example.todo.clientcore.lists.ListsViewModel
 import com.example.todo.clientcore.net.ApiClient
 import com.example.todo.common.ListDto
+import com.example.todo.common.inviteTokenOf
 import com.example.todo.uicompose.ListsIndex
 import com.example.todo.uicompose.ListDetail
+import com.example.todo.uicompose.MembersHost
 import io.ktor.client.HttpClient
 import io.ktor.client.engine.cio.CIO
 import kotlinx.coroutines.CoroutineScope
@@ -95,6 +97,7 @@ private fun MasterDetail(container: AppContainer, onSignOut: () -> Unit) {
                     listsVm.delete(id)
                     if (selectedList?.id == id) selectedList = null
                 },
+                onJoin = { listsVm.join(inviteTokenOf(it)) },
                 onSignOut = onSignOut,
                 selectedId = current?.id,
             )
@@ -108,24 +111,38 @@ private fun MasterDetail(container: AppContainer, onSignOut: () -> Unit) {
                 .background(MaterialTheme.colorScheme.outlineVariant),
         )
 
-        // Right detail — Todos for selected list
+        // Right detail — Todos (or members) for selected list
         if (current != null) {
-            val detailVm = remember(current.id) { container.listDetailViewModel(current.id) }
-            LaunchedEffect(current.id) { detailVm.load() }
-            val detailState by detailVm.state.collectAsState()
-
+            var showingMembers by remember(current.id) { mutableStateOf(false) }
             Surface(modifier = Modifier.fillMaxSize()) {
-                ListDetail(
-                    list = current,
-                    state = detailState,
-                    onBack = { selectedList = null },
-                    onAdd = { t, d, dt -> detailVm.add(t, d, dt) },
-                    onToggle = { detailVm.toggle(it) },
-                    onSave = { todo, t, d, dt -> detailVm.update(todo, t, d, dt) },
-                    onDelete = { detailVm.delete(it) },
-                    onReorder = { id, before -> detailVm.reorder(id, before) },
-                    showBackButton = false,
-                )
+                if (showingMembers) {
+                    MembersHost(
+                        container = container,
+                        list = current,
+                        onBack = { showingMembers = false },
+                        onLeft = {
+                            showingMembers = false
+                            if (selectedList?.id == current.id) selectedList = null
+                            listsVm.load()
+                        },
+                    )
+                } else {
+                    val detailVm = remember(current.id) { container.listDetailViewModel(current.id) }
+                    LaunchedEffect(current.id) { detailVm.load() }
+                    val detailState by detailVm.state.collectAsState()
+                    ListDetail(
+                        list = current,
+                        state = detailState,
+                        onBack = { selectedList = null },
+                        onAdd = { t, d, dt -> detailVm.add(t, d, dt) },
+                        onToggle = { detailVm.toggle(it) },
+                        onSave = { todo, t, d, dt -> detailVm.update(todo, t, d, dt) },
+                        onDelete = { detailVm.delete(it) },
+                        onReorder = { id, before -> detailVm.reorder(id, before) },
+                        onOpenMembers = { showingMembers = true },
+                        showBackButton = false,
+                    )
+                }
             }
         } else {
             Surface(modifier = Modifier.fillMaxSize()) {

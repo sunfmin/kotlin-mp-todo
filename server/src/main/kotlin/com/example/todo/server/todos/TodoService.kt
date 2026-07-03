@@ -5,8 +5,8 @@ import com.example.todo.common.ReorderTodoRequest
 import com.example.todo.common.TodoDto
 import com.example.todo.common.UpdateTodoRequest
 import com.example.todo.server.DomainException
-import com.example.todo.server.db.Lists
 import com.example.todo.server.db.Todos
+import com.example.todo.server.membership.Members
 import kotlinx.datetime.Clock
 import kotlinx.datetime.Instant
 import kotlinx.datetime.LocalDate
@@ -32,7 +32,7 @@ import java.util.UUID
 class TodoService(private val clock: () -> Instant = { Clock.System.now() }) {
 
     fun create(userId: UUID, listId: UUID, req: CreateTodoRequest): TodoDto = transaction {
-        requireOwned(userId, listId)
+        Members.requireMember(userId, listId)
         val cleanTitle = validateTitle(req.title)
         val cleanDesc = req.description?.trim()?.takeIf(String::isNotEmpty)
         val cleanDue = req.dueDate?.let { parseDueDate(it) }
@@ -67,20 +67,20 @@ class TodoService(private val clock: () -> Instant = { Clock.System.now() }) {
 
     /** Todos in the List, ordered by [Todos.orderKey] ascending. */
     fun listForList(userId: UUID, listId: UUID): List<TodoDto> = transaction {
-        requireOwned(userId, listId)
+        Members.requireMember(userId, listId)
         Todos.selectAll().where { Todos.listId eq listId }
             .orderBy(Todos.orderKey to org.jetbrains.exposed.sql.SortOrder.ASC)
             .map { it.toDto() }
     }
 
     fun get(userId: UUID, listId: UUID, todoId: UUID): TodoDto = transaction {
-        requireOwned(userId, listId)
+        Members.requireMember(userId, listId)
         requireTodo(listId, todoId).toDto()
     }
 
     fun update(userId: UUID, listId: UUID, todoId: UUID, req: UpdateTodoRequest): TodoDto =
         transaction {
-            requireOwned(userId, listId)
+            Members.requireMember(userId, listId)
             val old = requireTodo(listId, todoId)
             // A null field means "leave unchanged"; a present-but-blank field
             // means "clear it" (so a user can remove a description or due date).
@@ -113,14 +113,14 @@ class TodoService(private val clock: () -> Instant = { Clock.System.now() }) {
         }
 
     fun delete(userId: UUID, listId: UUID, todoId: UUID): Unit = transaction {
-        requireOwned(userId, listId)
+        Members.requireMember(userId, listId)
         requireTodo(listId, todoId)
         Todos.deleteWhere { Todos.id eq todoId }
     }
 
     fun reorder(userId: UUID, listId: UUID, todoId: UUID, req: ReorderTodoRequest): TodoDto =
         transaction {
-            requireOwned(userId, listId)
+            Members.requireMember(userId, listId)
             val old = requireTodo(listId, todoId)
 
             // Current ordered Todos (excluding the one being moved).
@@ -175,12 +175,6 @@ class TodoService(private val clock: () -> Instant = { Clock.System.now() }) {
             Todos.update({ Todos.id eq id }) { it[Todos.orderKey] = key }
         }
         return movedKey
-    }
-
-    private fun requireOwned(userId: UUID, listId: UUID) {
-        val row = Lists.selectAll().where { Lists.id eq listId }.singleOrNull()
-            ?: throw DomainException.notFound("List not found.")
-        if (row[Lists.ownerId] != userId) throw DomainException.notFound("List not found.")
     }
 
     private fun requireTodo(listId: UUID, todoId: UUID): ResultRow =

@@ -27,4 +27,24 @@ object ApiRoutes {
 
     /** Path to reorder a Todo within its List. */
     fun todoReorder(listId: String, todoId: String) = "${todo(listId, todoId)}/reorder"
+
+    // Membership & sharing (slice 5)
+
+    /** Members of a List. */
+    fun members(listId: String) = "${list(listId)}/members"
+
+    /** A single member of a List (for remove/leave). */
+    fun member(listId: String, userId: String) = "${members(listId)}/$userId"
+
+    /** The List's single Invite Link (GET current, POST regenerate, DELETE revoke). */
+    fun inviteLink(listId: String) = "${list(listId)}/invite-link"
+
+    /** Base path for following an Invite Link by its token. */
+    const val INVITE = "/invite"
+
+    /** Preview the List an Invite Link points to (name only). */
+    fun invitePreview(token: String) = "$INVITE/$token"
+
+    /** Join the List an active Invite Link points to, as an EDITOR. */
+    fun inviteJoin(token: String) = "$INVITE/$token/join"
 }

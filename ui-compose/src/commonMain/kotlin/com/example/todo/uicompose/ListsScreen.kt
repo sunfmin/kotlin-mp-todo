@@ -44,9 +44,13 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.example.todo.clientcore.AppContainer
 import com.example.todo.clientcore.lists.ListsState
+import com.example.todo.clientcore.membership.MembersState
 import com.example.todo.clientcore.todos.ListDetailState
 import com.example.todo.common.ListDto
+import com.example.todo.common.MemberDto
+import com.example.todo.common.Role
 import com.example.todo.common.TodoDto
+import com.example.todo.common.inviteTokenOf
 
 /**
  * The authenticated Lists app: index of the user's Lists with create/rename/delete,
@@ -60,6 +64,7 @@ fun ListsApp(container: AppContainer, onSignOut: () -> Unit) {
 
     var openList by remember { mutableStateOf<ListDto?>(null) }
     val current = openList?.let { o -> state.lists.firstOrNull { it.id == o.id } ?: o }
+    var showingMembers by remember(current?.id) { mutableStateOf(false) }
 
     if (current == null) {
         ListsIndex(
@@ -69,7 +74,15 @@ fun ListsApp(container: AppContainer, onSignOut: () -> Unit) {
             onCreate = { viewModel.create(it) },
             onRename = { id, name -> viewModel.rename(id, name) },
             onDelete = { id -> viewModel.delete(id) },
+            onJoin = { viewModel.join(inviteTokenOf(it)) },
             onSignOut = onSignOut,
+        )
+    } else if (showingMembers) {
+        MembersHost(
+            container = container,
+            list = current,
+            onBack = { showingMembers = false },
+            onLeft = { showingMembers = false; openList = null; viewModel.load() },
         )
     } else {
         val detailViewModel = remember(current.id) { container.listDetailViewModel(current.id) }
@@ -83,8 +96,41 @@ fun ListsApp(container: AppContainer, onSignOut: () -> Unit) {
             onSave = { todo, t, d, dt -> detailViewModel.update(todo, t, d, dt) },
             onDelete = { detailViewModel.delete(it) },
             onReorder = { id, before -> detailViewModel.reorder(id, before) },
+            onOpenMembers = { showingMembers = true },
         )
     }
+}
+
+/**
+ * Wires a [com.example.todo.clientcore.membership.MembersViewModel] for one List
+ * and renders the members + sharing screen. Kept here so both the shared app and
+ * the desktop master-detail can reuse the same members UI.
+ */
+@Composable
+fun MembersHost(
+    container: AppContainer,
+    list: ListDto,
+    onBack: () -> Unit,
+    onLeft: () -> Unit,
+) {
+    val isOwner = list.role == Role.OWNER
+    val vm = remember(list.id) { container.membersViewModel(list.id, isOwner) }
+    LaunchedEffect(list.id) { vm.load() }
+    val currentEmail = remember { container.currentEmail() }
+    MembersScreen(
+        list = list,
+        state = vm.state.collectAsState().value,
+        isOwner = isOwner,
+        currentEmail = currentEmail,
+        onBack = onBack,
+        onGenerate = { vm.generateInviteLink() },
+        onRevoke = { vm.revokeInviteLink() },
+        onRemove = { vm.removeMember(it) },
+        onLeave = {
+            val me = vm.state.value.members.firstOrNull { m -> m.email == currentEmail }
+            if (me != null) vm.removeMember(me.userId).also { job -> job.invokeOnCompletion { onLeft() } }
+        },
+    )
 }
 
 @Composable
@@ -96,6 +142,7 @@ fun ListsIndex(
     onRename: (String, String) -> Unit,
     onDelete: (String) -> Unit,
     onSignOut: () -> Unit,
+    onJoin: (String) -> Unit = {},
     selectedId: String? = null,
 ) {
     var newName by remember { mutableStateOf("") }
@@ -161,10 +208,34 @@ fun ListsIndex(
                 }
             }
         }
+        JoinListRow(onJoin = onJoin)
+
         TextButton(
             onClick = onSignOut,
             modifier = Modifier.padding(top = 12.dp),
         ) { Text("Sign out", style = MaterialTheme.typography.bodySmall) }
+    }
+}
+
+@Composable
+private fun JoinListRow(onJoin: (String) -> Unit) {
+    var invite by remember { mutableStateOf("") }
+    Row(
+        modifier = Modifier.fillMaxWidth().padding(top = 16.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        OutlinedTextField(
+            value = invite,
+            onValueChange = { invite = it },
+            label = { Text("Invite link or code") },
+            singleLine = true,
+            modifier = Modifier.weight(1f),
+        )
+        Button(
+            onClick = { onJoin(invite.trim()); invite = "" },
+            enabled = invite.isNotBlank(),
+            modifier = Modifier.padding(start = 8.dp),
+        ) { Text("Join") }
     }
 }
 
@@ -247,6 +318,7 @@ fun ListDetail(
     onSave: (TodoDto, String, String?, String?) -> Unit,
     onDelete: (TodoDto) -> Unit,
     onReorder: (String, String?) -> Unit,
+    onOpenMembers: (() -> Unit)? = null,
     showBackButton: Boolean = true,
 ) {
     val active = state.todos.filterNot { it.completed }
@@ -260,22 +332,29 @@ fun ListDetail(
         // Header ribbon
         Surface(color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.4f)) {
             Column(modifier = Modifier.fillMaxWidth().padding(horizontal = 24.dp, vertical = 16.dp)) {
-                if (showBackButton) {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        TextButton(onClick = onBack) { Text("← Lists") }
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                ) {
+                    Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.weight(1f)) {
+                        if (showBackButton) {
+                            TextButton(onClick = onBack) { Text("← Lists") }
+                        }
                         Text(
                             list.name,
                             style = MaterialTheme.typography.titleLarge,
                             fontWeight = FontWeight.SemiBold,
-                            modifier = Modifier.padding(start = 4.dp),
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                            modifier = Modifier.padding(start = if (showBackButton) 4.dp else 0.dp),
                         )
                     }
-                } else {
-                    Text(
-                        list.name,
-                        style = MaterialTheme.typography.titleLarge,
-                        fontWeight = FontWeight.SemiBold,
-                    )
+                    if (onOpenMembers != null) {
+                        TextButton(onClick = onOpenMembers) {
+                            Text(if (list.role == Role.OWNER) "Share" else "Members")
+                        }
+                    }
                 }
                 AddTodoRow(onAdd = onAdd)
             }
@@ -631,6 +710,169 @@ private fun EmptyTodos() {
             color = MaterialTheme.colorScheme.onSurfaceVariant,
             modifier = Modifier.padding(top = 4.dp),
         )
+    }
+}
+
+/**
+ * The members + sharing screen for one List (slice 5). Owners manage the Invite
+ * Link (generate/revoke) and remove members; editors see the roster and can leave.
+ */
+@Composable
+fun MembersScreen(
+    list: ListDto,
+    state: MembersState,
+    isOwner: Boolean,
+    currentEmail: String?,
+    onBack: () -> Unit,
+    onGenerate: () -> Unit,
+    onRevoke: () -> Unit,
+    onRemove: (String) -> Unit,
+    onLeave: () -> Unit,
+) {
+    Column(modifier = Modifier.fillMaxSize()) {
+        Surface(color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.4f)) {
+            Row(
+                modifier = Modifier.fillMaxWidth().padding(horizontal = 24.dp, vertical = 16.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                TextButton(onClick = onBack) { Text("← Back") }
+                Text(
+                    "${list.name} · Members",
+                    style = MaterialTheme.typography.titleLarge,
+                    fontWeight = FontWeight.SemiBold,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier.padding(start = 4.dp),
+                )
+            }
+        }
+
+        ErrorText(state.error)
+
+        Column(modifier = Modifier.fillMaxWidth().padding(horizontal = 24.dp, vertical = 12.dp)) {
+            if (isOwner) {
+                InviteLinkCard(
+                    token = state.inviteLink?.token,
+                    expiresAt = state.inviteLink?.expiresAt,
+                    onGenerate = onGenerate,
+                    onRevoke = onRevoke,
+                )
+            }
+
+            Text(
+                "People",
+                style = MaterialTheme.typography.labelLarge,
+                fontWeight = FontWeight.SemiBold,
+                modifier = Modifier.padding(top = 16.dp, bottom = 4.dp),
+            )
+            LazyColumn(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                items(state.members, key = { it.userId }) { member ->
+                    MemberRow(
+                        member = member,
+                        isMe = member.email == currentEmail,
+                        canRemove = isOwner && member.role != Role.OWNER,
+                        onRemove = { onRemove(member.userId) },
+                    )
+                }
+            }
+
+            if (!isOwner) {
+                TextButton(
+                    onClick = onLeave,
+                    modifier = Modifier.padding(top = 16.dp),
+                ) { Text("Leave this list", color = MaterialTheme.colorScheme.error) }
+            }
+        }
+    }
+}
+
+@Composable
+private fun InviteLinkCard(
+    token: String?,
+    expiresAt: String?,
+    onGenerate: () -> Unit,
+    onRevoke: () -> Unit,
+) {
+    Surface(
+        modifier = Modifier.fillMaxWidth(),
+        color = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.3f),
+        shape = MaterialTheme.shapes.small,
+    ) {
+        Column(modifier = Modifier.fillMaxWidth().padding(16.dp)) {
+            Text("Invite link", style = MaterialTheme.typography.labelLarge, fontWeight = FontWeight.SemiBold)
+            if (token == null) {
+                Text(
+                    "No active invite link. Generate one to let others join as editors.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.padding(top = 4.dp),
+                )
+                Button(onClick = onGenerate, modifier = Modifier.padding(top = 8.dp)) {
+                    Text("Generate link")
+                }
+            } else {
+                OutlinedTextField(
+                    value = token,
+                    onValueChange = {},
+                    readOnly = true,
+                    label = { Text("Share this code") },
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth().padding(top = 8.dp),
+                )
+                expiresAt?.let {
+                    Text(
+                        "Expires $it",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.padding(top = 4.dp),
+                    )
+                }
+                Row(modifier = Modifier.padding(top = 8.dp)) {
+                    TextButton(onClick = onGenerate) { Text("Regenerate") }
+                    TextButton(onClick = onRevoke) {
+                        Text("Revoke", color = MaterialTheme.colorScheme.error)
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun MemberRow(
+    member: MemberDto,
+    isMe: Boolean,
+    canRemove: Boolean,
+    onRemove: () -> Unit,
+) {
+    Surface(
+        modifier = Modifier.fillMaxWidth(),
+        color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.3f),
+        shape = MaterialTheme.shapes.small,
+    ) {
+        Row(
+            modifier = Modifier.heightIn(min = 48.dp).fillMaxWidth().padding(horizontal = 12.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Column(modifier = Modifier.weight(1f)) {
+                Text(
+                    member.email + if (isMe) " (you)" else "",
+                    style = MaterialTheme.typography.bodyMedium,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+                Text(
+                    if (member.role == Role.OWNER) "Owner" else "Editor",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+            if (canRemove) {
+                IconButton(onClick = onRemove, modifier = Modifier.size(32.dp)) {
+                    Text("×", style = MaterialTheme.typography.titleMedium, color = MaterialTheme.colorScheme.error)
+                }
+            }
+        }
     }
 }
 

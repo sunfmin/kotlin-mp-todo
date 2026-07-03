@@ -13,9 +13,13 @@ import com.example.todo.clientcore.auth.InMemoryTokenStore
 import com.example.todo.clientcore.lists.ListsViewModel
 import com.example.todo.clientcore.net.ApiClient
 import com.example.todo.common.ListDto
+import com.example.todo.common.MemberDto
+import com.example.todo.common.Role
 import com.example.todo.common.TodoDto
+import com.example.todo.common.inviteTokenOf
 import io.ktor.client.HttpClient
 import io.ktor.client.engine.js.Js
+import kotlinx.browser.window
 import kotlinx.coroutines.MainScope
 import org.jetbrains.compose.web.attributes.disabled
 import org.jetbrains.compose.web.attributes.InputType
@@ -61,7 +65,14 @@ fun main() {
 @Composable
 private fun ListsApp(container: AppContainer, onSignOut: () -> Unit) {
     val viewModel = remember { container.listsViewModel() }
-    LaunchedEffect(Unit) { viewModel.load() }
+    LaunchedEffect(Unit) {
+        viewModel.load()
+        // Follow an invite link the user opened (…?invite=<token>) once, then clear it.
+        inviteTokenFromUrl()?.let { token ->
+            viewModel.join(token)
+            window.history.replaceState(null, "", window.location.pathname)
+        }
+    }
     val state by viewModel.state.collectAsState()
 
     var openList by remember { mutableStateOf<ListDto?>(null) }
@@ -75,11 +86,24 @@ private fun ListsApp(container: AppContainer, onSignOut: () -> Unit) {
             onCreate = { viewModel.create(it) },
             onRename = { id, name -> viewModel.rename(id, name) },
             onDelete = { viewModel.delete(it) },
+            onJoin = { viewModel.join(inviteTokenOf(it)) },
             onSignOut = onSignOut,
         )
     } else {
         ListDetail(current, container) { openList = null }
     }
+}
+
+/** The invite token from the page URL's `invite` query parameter, if present. */
+private fun inviteTokenFromUrl(): String? {
+    val search = window.location.search.removePrefix("?")
+    if (search.isEmpty()) return null
+    return search.split("&")
+        .map { it.split("=", limit = 2) }
+        .firstOrNull { it.first() == "invite" }
+        ?.getOrNull(1)
+        ?.takeIf { it.isNotBlank() }
+        ?.let { inviteTokenOf(it) }
 }
 
 @Composable
@@ -90,9 +114,11 @@ private fun ListsIndex(
     onCreate: (String) -> Unit,
     onRename: (String, String) -> Unit,
     onDelete: (String) -> Unit,
+    onJoin: (String) -> Unit,
     onSignOut: () -> Unit,
 ) {
     var newName by remember { mutableStateOf("") }
+    var invite by remember { mutableStateOf("") }
     H2 { Text("Your lists") }
     Button(attrs = { onClick { onSignOut() } }) { Text("Sign out") }
     P {
@@ -102,13 +128,23 @@ private fun ListsIndex(
             onClick { onCreate(newName.trim()); newName = "" }
         }) { Text("Add list") }
     }
+    P {
+        TextInput(invite) { onInput { invite = it.value } }
+        Button(attrs = {
+            if (invite.isBlank()) disabled()
+            onClick { onJoin(invite.trim()); invite = "" }
+        }) { Text("Join with invite") }
+    }
     error?.let { P { Text("⚠ $it") } }
     if (lists.isEmpty()) {
         P { Text("No lists yet. Create your first one above.") }
     } else {
         Ul {
             lists.forEach { list ->
-                Li { ListRow(list, onOpen = { onOpen(list) }, onRename = onRename, onDelete = onDelete) }
+                Li {
+                    ListRow(list, onOpen = { onOpen(list) }, onRename = onRename, onDelete = onDelete)
+                    Span { Text(" [${if (list.role == Role.OWNER) "owner" else "editor"}]") }
+                }
             }
         }
     }
@@ -141,8 +177,16 @@ private fun ListDetail(list: ListDto, container: AppContainer, onBack: () -> Uni
     LaunchedEffect(list.id) { viewModel.load() }
     val state by viewModel.state.collectAsState()
 
+    var showMembers by remember(list.id) { mutableStateOf(false) }
+
     Button(attrs = { onClick { onBack() } }) { Text("← Lists") }
     H2 { Text(list.name) }
+    Button(attrs = { onClick { showMembers = !showMembers } }) {
+        Text(if (showMembers) "Hide members" else if (list.role == Role.OWNER) "Share & members" else "Members")
+    }
+    if (showMembers) {
+        WebMembers(list, container)
+    }
 
     // Add todo
     var newTitle by remember { mutableStateOf("") }
@@ -193,6 +237,60 @@ private fun ListDetail(list: ListDto, container: AppContainer, onBack: () -> Uni
                 }
             }
         }
+    }
+}
+
+@Composable
+private fun WebMembers(list: ListDto, container: AppContainer) {
+    val isOwner = list.role == Role.OWNER
+    val vm = remember(list.id) { container.membersViewModel(list.id, isOwner) }
+    LaunchedEffect(list.id) { vm.load() }
+    val state by vm.state.collectAsState()
+    val currentEmail = remember { container.currentEmail() }
+
+    Div {
+        if (isOwner) {
+            val link = state.inviteLink
+            if (link == null) {
+                P {
+                    Text("No active invite link. ")
+                    Button(attrs = { onClick { vm.generateInviteLink() } }) { Text("Generate link") }
+                }
+            } else {
+                P { Text("Invite code: ${link.token}") }
+                link.expiresAt?.let { P { Text("Expires: $it") } }
+                P {
+                    Button(attrs = { onClick { vm.generateInviteLink() } }) { Text("Regenerate") }
+                    Span { Text(" ") }
+                    Button(attrs = { onClick { vm.revokeInviteLink() } }) { Text("Revoke") }
+                }
+            }
+        }
+
+        state.error?.let { P { Text("⚠ $it") } }
+
+        Ul {
+            state.members.forEach { member ->
+                Li { WebMemberRow(member, isOwner, member.email == currentEmail) { vm.removeMember(member.userId) } }
+            }
+        }
+
+        if (!isOwner) {
+            val me = state.members.firstOrNull { it.email == currentEmail }
+            if (me != null) {
+                Button(attrs = { onClick { vm.removeMember(me.userId) } }) { Text("Leave this list") }
+            }
+        }
+    }
+}
+
+@Composable
+private fun WebMemberRow(member: MemberDto, viewerIsOwner: Boolean, isMe: Boolean, onRemove: () -> Unit) {
+    val roleLabel = if (member.role == Role.OWNER) "owner" else "editor"
+    Span { Text("${member.email} ($roleLabel)${if (isMe) " (you)" else ""}") }
+    if (viewerIsOwner && member.role != Role.OWNER) {
+        Span { Text(" ") }
+        Button(attrs = { onClick { onRemove() } }) { Text("Remove") }
     }
 }
 
